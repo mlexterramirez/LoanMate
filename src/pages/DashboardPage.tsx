@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Grid, Typography, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip } from '@mui/material';
+import { 
+  Box, Grid, Typography, Tab, Tabs, Table, TableBody, TableCell, 
+  TableContainer, TableHead, TableRow, Paper, Chip, CircularProgress, Alert 
+} from '@mui/material';
 import SummaryCard from '../components/SummaryCard';
 import { getLoans, checkAndUpdateOverdueLoans } from '../services/loans';
 import { getPayments } from '../services/payments';
@@ -7,7 +10,6 @@ import { getBorrowers } from '../services/borrowers';
 import { Loan, Borrower } from '../types';
 import { AttachMoney, MoneyOff, Schedule, Warning } from '@mui/icons-material';
 import { formatFirestoreDate } from '../utils/dateUtils';
-import { toDate } from '../utils/dateUtils';
 
 interface DashboardSummary {
   totalCollected: number;
@@ -19,7 +21,7 @@ interface DashboardSummary {
 interface UpcomingPayment {
   borrowerId: string;
   borrowerName: string;
-  dueDate: Date;
+  dueDate: Date | null;
   amount: number;
   status: string;
   loanStats: string;
@@ -29,6 +31,7 @@ interface UpcomingPayment {
 export default function DashboardPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [summary, setSummary] = useState<DashboardSummary>({
     totalCollected: 0,
     totalOutstanding: 0,
@@ -37,63 +40,75 @@ export default function DashboardPage() {
   });
   const [upcomingPayments, setUpcomingPayments] = useState<UpcomingPayment[]>([]);
   const [tabValue, setTabValue] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
-      await checkAndUpdateOverdueLoans();
-      const allLoans = await getLoans();
-      const allBorrowers = await getBorrowers();
-      const allPayments = await getPayments();
-      
-      const collected = allPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
-      const outstanding = allLoans
-        .filter(loan => loan.status !== 'Fully Paid')
-        .reduce((sum, loan) => sum + loan.totalPrice - (loan.totalPaid || 0), 0);
-      
-      const today = new Date();
-      const upcoming = allLoans.filter(loan => 
-        loan.dueDate && 
-        loan.dueDate instanceof Date && // Ensure it's a Date object
-        loan.dueDate > today && 
-        loan.status !== 'Fully Paid'
-      ).length;
-      
-      const late = allLoans.filter(loan => loan.status.includes('Delayed')).length;
-      
-      // Prepare upcoming payments data with borrower stats
-      const paymentsData = allLoans
-        .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
-        .map(loan => {
-          const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
-          return {
-            borrowerId: loan.borrowerId,
-            borrowerName: loan.borrowerName,
-            dueDate: loan.dueDate instanceof Date ? loan.dueDate : toDate(loan.dueDate),
-            amount: loan.monthlyDue,
-            status: loan.status.includes('Delayed') ? 'Late' : 'Active',
-            loanStats: borrower ? 
-              `${borrower.loanStats.totalLoans} Loans, ${borrower.loanStats.latePayments} Late, ₱${borrower.loanStats.totalPaid.toLocaleString()} Paid` : 
-              '',
-            itemName: loan.itemName
-          };
-        })
-        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-      
-      setSummary({
-        totalCollected: collected,
-        totalOutstanding: outstanding,
-        upcomingDue: upcoming,
-        lateLoans: late,
-      });
-      
-      setLoans(allLoans);
-      setBorrowers(allBorrowers);
-      setUpcomingPayments(paymentsData);
+      try {
+        setLoading(true);
+        setError(null);
+        
+        await checkAndUpdateOverdueLoans();
+        const [allLoans, allBorrowers, allPayments] = await Promise.all([
+          getLoans(),
+          getBorrowers(),
+          getPayments()
+        ]);
+
+        const collected = allPayments.reduce((sum: number, payment: any) => sum + (payment.amountPaid || 0), 0);
+        const outstanding = allLoans
+          .filter(loan => loan.status !== 'Fully Paid')
+          .reduce((sum: number, loan: Loan) => sum + (loan.totalPrice || 0) - (loan.totalPaid || 0), 0);
+        
+        const today = new Date();
+        const upcoming = allLoans.filter(loan => 
+          loan.dueDate && 
+          loan.dueDate > today && 
+          loan.status !== 'Fully Paid'
+        ).length;
+        
+        const late = allLoans.filter(loan => loan.status?.includes?.('Delayed')).length;
+        
+        const paymentsData = allLoans
+          .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
+          .map(loan => {
+            const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
+            return {
+              borrowerId: loan.borrowerId || '',
+              borrowerName: loan.borrowerName || '',
+              dueDate: loan.dueDate || null,
+              amount: loan.monthlyDue || 0,
+              status: loan.status?.includes?.('Delayed') ? 'Late' : 'Active',
+              loanStats: borrower ? 
+                `${borrower.loanStats?.totalLoans || 0} Loans, ${borrower.loanStats?.latePayments || 0} Late, ₱${(borrower.loanStats?.totalPaid || 0).toLocaleString()} Paid` : 
+                '',
+              itemName: loan.itemName || ''
+            };
+          })
+          .sort((a, b) => (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0));
+        
+        setSummary({
+          totalCollected: collected,
+          totalOutstanding: outstanding,
+          upcomingDue: upcoming,
+          lateLoans: late,
+        });
+        
+        setLoans(allLoans);
+        setBorrowers(allBorrowers);
+        setPayments(allPayments);
+        setUpcomingPayments(paymentsData);
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError('Failed to load dashboard data');
+      } finally {
+        setLoading(false);
+      }
     };
     
     fetchData();
     
-    // Check for overdue loans every hour
     const interval = setInterval(checkAndUpdateOverdueLoans, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -102,10 +117,12 @@ export default function DashboardPage() {
     setTabValue(newValue);
   };
 
-  // Filter payments based on selected tab
   const filteredPayments = tabValue === 0 
     ? upcomingPayments 
     : upcomingPayments.filter(payment => payment.status === 'Late');
+
+  if (loading) return <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />;
+  if (error) return <Alert severity="error" sx={{ m: 2 }}>{error}</Alert>;
 
   return (
     <Box>
@@ -175,7 +192,7 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableCell>{payment.borrowerName}</TableCell>
                     <TableCell>
-                      {formatFirestoreDate(payment.dueDate)}
+                      {payment.dueDate ? formatFirestoreDate(payment.dueDate) : 'N/A'}
                       {payment.status === 'Late' && (
                         <Chip label="Late" color="error" size="small" sx={{ ml: 1 }} />
                       )}
@@ -234,13 +251,13 @@ export default function DashboardPage() {
             {borrowers.map(borrower => (
               <TableRow key={borrower.id}>
                 <TableCell>{borrower.fullName}</TableCell>
-                <TableCell>{borrower.loanStats.totalLoans}</TableCell>
-                <TableCell>{borrower.loanStats.latePayments}</TableCell>
-                <TableCell>₱{borrower.loanStats.totalPaid.toLocaleString()}</TableCell>
+                <TableCell>{borrower.loanStats?.totalLoans || 0}</TableCell>
+                <TableCell>{borrower.loanStats?.latePayments || 0}</TableCell>
+                <TableCell>₱{(borrower.loanStats?.totalPaid || 0).toLocaleString()}</TableCell>
                 <TableCell>
                   <Chip 
-                    label={borrower.loanStats.latePayments > 0 ? 'Has Late Payments' : 'Good Standing'} 
-                    color={borrower.loanStats.latePayments > 0 ? 'warning' : 'success'} 
+                    label={(borrower.loanStats?.latePayments || 0) > 0 ? 'Has Late Payments' : 'Good Standing'} 
+                    color={(borrower.loanStats?.latePayments || 0) > 0 ? 'warning' : 'success'} 
                   />
                 </TableCell>
               </TableRow>

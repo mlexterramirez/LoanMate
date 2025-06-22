@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Box, Button, Typography, Table, TableBody, TableCell, TableContainer, 
-  TableHead, TableRow, Paper, IconButton, Chip, Tooltip 
+  TableHead, TableRow, Paper, IconButton, Chip, Tooltip
 } from '@mui/material';
 import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
 import { getBorrowers, deleteBorrower } from '../services/borrowers';
@@ -51,7 +51,6 @@ export default function BorrowersPage() {
           Add Borrower
         </Button>
       </Box>
-      
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -61,8 +60,6 @@ export default function BorrowersPage() {
               <TableCell>Email</TableCell>
               <TableCell>Total Loans</TableCell>
               <TableCell>Late Payments</TableCell>
-              <TableCell>Total Paid</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -72,29 +69,21 @@ export default function BorrowersPage() {
                 <TableCell>{borrower.fullName}</TableCell>
                 <TableCell>{borrower.primaryContact}</TableCell>
                 <TableCell>{borrower.contactEmail}</TableCell>
-                <TableCell>{borrower.loanStats.totalLoans}</TableCell>
-                <TableCell>{borrower.loanStats.latePayments}</TableCell>
-                <TableCell>₱{borrower.loanStats.totalPaid.toFixed(2)}</TableCell>
                 <TableCell>
-                  <Chip 
-                    label={borrower.loanStats.latePayments > 0 ? 'Has Late Payments' : 'Good Standing'} 
-                    color={borrower.loanStats.latePayments > 0 ? 'warning' : 'success'} 
-                  />
+                  <Chip label={borrower.loanStats?.totalLoans || 0} color="primary" />
                 </TableCell>
                 <TableCell>
-                  <Tooltip title="View Details">
-                    <IconButton size="small">
-                      <Visibility fontSize="small" />
+                  <Chip label={borrower.loanStats?.latePayments || 0} color="secondary" />
+                </TableCell>
+                <TableCell>
+                  <Tooltip title="Edit">
+                    <IconButton onClick={() => handleEdit(borrower)}>
+                      <Edit />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Edit Borrower">
-                    <IconButton size="small" onClick={() => handleEdit(borrower)}>
-                      <Edit fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete Borrower">
-                    <IconButton size="small" onClick={() => handleDelete(borrower.id!)}>
-                      <Delete fontSize="small" />
+                  <Tooltip title="Delete">
+                    <IconButton onClick={() => handleDelete(borrower.id!)}>
+                      <Delete />
                     </IconButton>
                   </Tooltip>
                 </TableCell>
@@ -103,13 +92,9 @@ export default function BorrowersPage() {
           </TableBody>
         </Table>
       </TableContainer>
-
-      <AddBorrowerDialog 
-        open={openDialog} 
-        onClose={() => {
-          setOpenDialog(false);
-          setEditBorrower(null);
-        }} 
+      <AddBorrowerDialog
+        open={openDialog}
+        onClose={() => setOpenDialog(false)}
         onBorrowerAdded={fetchBorrowers}
         borrower={editBorrower}
       />

@@ -3,11 +3,11 @@ export interface Borrower {
   id?: string;
   fullName: string;
   homeAddress: string;
-  workAddress?: string;
   primaryContact: string;
   contactEmail?: string;
-  referenceContact1?: { name: string; contact: string };
-  referenceContact2?: { name: string; contact: string };
+  workAddress?: string;
+  referenceContact1: { name: string; contact: string };
+  referenceContact2: { name: string; contact: string };
   photoURL?: string;
   loanStats: {
     totalLoans: number;
