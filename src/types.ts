@@ -1,3 +1,4 @@
+// Remove Firebase specific types and use generic types instead
 export interface Borrower {
   id?: string;
   fullName: string;
@@ -24,8 +25,8 @@ export interface Loan {
   downpayment: number;
   terms: number;
   monthlyInterestPct: number;
-  startDate: any;
-  dueDate?: any;
+  startDate: any; // Use any to avoid Firebase type dependency
+  dueDate?: any; // Use any to avoid Firebase type dependency
   monthlyDue: number;
   totalPaid?: number;
   paymentProgress?: string;
@@ -39,7 +40,7 @@ export interface Payment {
   id?: string;
   loanId: string;
   borrowerId: string;
-  paymentDate: any;
+  paymentDate: any; // Use any to avoid Firebase type dependency
   amountPaid: number;
   paymentMethod: 'Cash' | 'Bank Transfer' | 'Check';
   paymentStatus: 'Full' | 'Partial';

@@ -6,7 +6,8 @@ import { getPayments } from '../services/payments';
 import { getBorrowers } from '../services/borrowers';
 import { Loan, Borrower } from '../types';
 import { AttachMoney, MoneyOff, Schedule, Warning } from '@mui/icons-material';
-import { formatFirestoreDate, formatDate } from '../utils/dateUtils';
+import { formatFirestoreDate } from '../utils/dateUtils';
+import { toDate } from '../utils/dateUtils';
 
 interface DashboardSummary {
   totalCollected: number;
@@ -52,7 +53,8 @@ export default function DashboardPage() {
       const today = new Date();
       const upcoming = allLoans.filter(loan => 
         loan.dueDate && 
-        loan.dueDate.toDate() > today && 
+        loan.dueDate instanceof Date && // Ensure it's a Date object
+        loan.dueDate > today && 
         loan.status !== 'Fully Paid'
       ).length;
       
@@ -66,7 +68,7 @@ export default function DashboardPage() {
           return {
             borrowerId: loan.borrowerId,
             borrowerName: loan.borrowerName,
-            dueDate: loan.dueDate.toDate(),
+            dueDate: loan.dueDate instanceof Date ? loan.dueDate : toDate(loan.dueDate),
             amount: loan.monthlyDue,
             status: loan.status.includes('Delayed') ? 'Late' : 'Active',
             loanStats: borrower ? 
@@ -173,7 +175,7 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableCell>{payment.borrowerName}</TableCell>
                     <TableCell>
-                      {formatDate(payment.dueDate)}
+                      {formatFirestoreDate(payment.dueDate)}
                       {payment.status === 'Late' && (
                         <Chip label="Late" color="error" size="small" sx={{ ml: 1 }} />
                       )}

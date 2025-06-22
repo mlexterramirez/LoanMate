@@ -4,6 +4,7 @@ import { Payment } from '../types';
 import { addPayment } from '../services/payments';
 import { getLoans } from '../services/loans';
 import { Loan } from '../types';
+import { toDate } from '../utils/dateUtils';
 
 interface AddPaymentDialogProps {
   open: boolean;
