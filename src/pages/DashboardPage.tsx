@@ -3,13 +3,14 @@ import {
   Box, Grid, Typography, Tab, Tabs, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, Paper, Chip, CircularProgress, Alert 
 } from '@mui/material';
+import { AttachMoney, MoneyOff, Schedule, Warning } from '@mui/icons-material';
 import SummaryCard from '../components/SummaryCard';
 import { getLoans } from '../services/loans';
 import { getPayments } from '../services/payments';
 import { getBorrowers } from '../services/borrowers';
 import { Loan, Borrower } from '../types';
-import { AttachMoney, MoneyOff, Schedule, Warning } from '@mui/icons-material';
 import { formatFirestoreDate } from '../utils/dateUtils';
+import { calculateNextDueDate } from '../utils/calculations';
 
 interface DashboardSummary {
   totalCollected: number;
@@ -55,7 +56,6 @@ export default function DashboardPage() {
           getPayments()
         ]);
 
-        // Calculate summary stats
         const collected = allPayments.reduce((sum: number, payment: any) => 
           sum + (payment.amountPaid || 0), 0);
         
@@ -66,29 +66,31 @@ export default function DashboardPage() {
         
         const today = new Date();
         
-        // Filter upcoming payments
+        // Calculate upcoming payments with next unpaid due date
         const upcomingPaymentsData = allLoans
-          .filter(loan => {
-            if (loan.status === 'Fully Paid' || !loan.dueDate) return false;
-            
-            // Check if this due date has been paid
+          .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
+          .map(loan => {
+            const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
             const loanPayments = allPayments
               .filter(p => p.loanId === loan.id && p.paymentDate)
               .sort((a, b) => 
                 new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
               );
             
-            // If there's a payment after this due date, skip it
-            return !loanPayments.some(payment => 
-              new Date(payment.paymentDate) > new Date(loan.dueDate)
-            );
-          })
-          .map(loan => {
-            const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
+            // Find the next unpaid due date
+            let nextDueDate = new Date(loan.dueDate);
+            if (loanPayments.length > 0) {
+              const lastPaymentDate = new Date(loanPayments[0].paymentDate);
+              nextDueDate = calculateNextDueDate(lastPaymentDate, new Date(loan.dueDate));
+            }
+            
+            // Only show if next due date is in the future
+            if (nextDueDate < today) return null;
+
             return {
               borrowerId: loan.borrowerId || '',
               borrowerName: loan.borrowerName || '',
-              dueDate: loan.dueDate || null,
+              dueDate: nextDueDate,
               amount: loan.monthlyDue || 0,
               status: loan.status?.includes?.('Delayed') ? 'Late' : 'Active',
               loanStats: borrower ? 
@@ -97,7 +99,8 @@ export default function DashboardPage() {
               itemName: loan.itemName || ''
             };
           })
-          .sort((a, b) => (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0));
+          .filter(payment => payment !== null)
+          .sort((a, b) => (a!.dueDate?.getTime() || 0) - (b!.dueDate?.getTime() || 0)) as UpcomingPayment[];
         
         setSummary({
           totalCollected: collected,
