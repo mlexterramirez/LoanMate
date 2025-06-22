@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Button, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, IconButton } from '@mui/material';
-import { Add, Edit, Delete } from '@mui/icons-material';
+import { 
+  Box, Button, Typography, Table, TableBody, TableCell, TableContainer, 
+  TableHead, TableRow, Paper, IconButton, Chip, Tooltip 
+} from '@mui/material';
+import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
 import { getBorrowers, deleteBorrower } from '../services/borrowers';
 import { Borrower } from '../types';
 import AddBorrowerDialog from '../components/AddBorrowerDialog';
@@ -8,6 +11,7 @@ import AddBorrowerDialog from '../components/AddBorrowerDialog';
 export default function BorrowersPage() {
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
   const [openDialog, setOpenDialog] = useState(false);
+  const [editBorrower, setEditBorrower] = useState<Borrower | null>(null);
 
   const fetchBorrowers = async () => {
     const data = await getBorrowers();
@@ -23,6 +27,11 @@ export default function BorrowersPage() {
     }
   };
 
+  const handleEdit = (borrower: Borrower) => {
+    setEditBorrower(borrower);
+    setOpenDialog(true);
+  };
+
   useEffect(() => {
     fetchBorrowers();
   }, []);
@@ -30,11 +39,14 @@ export default function BorrowersPage() {
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Borrowers Management</Typography>
+        <Typography variant="h5">Borrower Management</Typography>
         <Button 
           variant="contained" 
           startIcon={<Add />}
-          onClick={() => setOpenDialog(true)}
+          onClick={() => {
+            setEditBorrower(null);
+            setOpenDialog(true);
+          }}
         >
           Add Borrower
         </Button>
@@ -46,7 +58,7 @@ export default function BorrowersPage() {
             <TableRow>
               <TableCell>Name</TableCell>
               <TableCell>Contact</TableCell>
-              <TableCell>Address</TableCell>
+              <TableCell>Email</TableCell>
               <TableCell>Total Loans</TableCell>
               <TableCell>Late Payments</TableCell>
               <TableCell>Total Paid</TableCell>
@@ -59,30 +71,32 @@ export default function BorrowersPage() {
               <TableRow key={borrower.id}>
                 <TableCell>{borrower.fullName}</TableCell>
                 <TableCell>{borrower.primaryContact}</TableCell>
-                <TableCell>{borrower.homeAddress}</TableCell>
+                <TableCell>{borrower.contactEmail}</TableCell>
                 <TableCell>{borrower.loanStats.totalLoans}</TableCell>
                 <TableCell>{borrower.loanStats.latePayments}</TableCell>
-                <TableCell>₱{borrower.loanStats.totalPaid.toLocaleString()}</TableCell>
+                <TableCell>₱{borrower.loanStats.totalPaid.toFixed(2)}</TableCell>
                 <TableCell>
-                  <Box 
-                    component="span" 
-                    sx={{
-                      px: 1.5,
-                      py: 0.5,
-                      borderRadius: 1,
-                      bgcolor: borrower.loanStats.latePayments ? 'error.light' : 'success.light',
-                      color: 'white',
-                      fontSize: '0.75rem'
-                    }}
-                  >
-                    {borrower.loanStats.latePayments ? 'Late' : 'Good'}
-                  </Box>
+                  <Chip 
+                    label={borrower.loanStats.latePayments > 0 ? 'Has Late Payments' : 'Good Standing'} 
+                    color={borrower.loanStats.latePayments > 0 ? 'warning' : 'success'} 
+                  />
                 </TableCell>
                 <TableCell>
-                  <IconButton size="small"><Edit fontSize="small" /></IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(borrower.id!)}>
-                    <Delete fontSize="small" />
-                  </IconButton>
+                  <Tooltip title="View Details">
+                    <IconButton size="small">
+                      <Visibility fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Edit Borrower">
+                    <IconButton size="small" onClick={() => handleEdit(borrower)}>
+                      <Edit fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete Borrower">
+                    <IconButton size="small" onClick={() => handleDelete(borrower.id!)}>
+                      <Delete fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             ))}
@@ -92,8 +106,12 @@ export default function BorrowersPage() {
 
       <AddBorrowerDialog 
         open={openDialog} 
-        onClose={() => setOpenDialog(false)} 
+        onClose={() => {
+          setOpenDialog(false);
+          setEditBorrower(null);
+        }} 
         onBorrowerAdded={fetchBorrowers}
+        borrower={editBorrower}
       />
     </Box>
   );

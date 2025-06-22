@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Button, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, IconButton } from '@mui/material';
-import { Add, Receipt } from '@mui/icons-material';
+import { Add, Receipt, Delete } from '@mui/icons-material';
 import { getLoans } from '../services/loans';
 import { getPayments, deletePayment } from '../services/payments';
 import { Loan, Payment } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
 import AddPaymentDialog from '../components/AddPaymentDialog';
+import { toDate } from '../utils/dateUtils';
 
 export default function PaymentsPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -15,8 +16,21 @@ export default function PaymentsPage() {
   const fetchData = async () => {
     const loansData = await getLoans();
     const paymentsData = await getPayments();
-    setLoans(loansData);
-    setPayments(paymentsData);
+    
+    // Convert Firestore Timestamps to Dates
+    const processedLoans = loansData.map(loan => ({
+      ...loan,
+      startDate: toDate(loan.startDate),
+      dueDate: loan.dueDate ? toDate(loan.dueDate) : undefined
+    }));
+    
+    const processedPayments = paymentsData.map(payment => ({
+      ...payment,
+      paymentDate: toDate(payment.paymentDate)
+    }));
+    
+    setLoans(processedLoans);
+    setPayments(processedPayments);
   };
 
   const handleDelete = async (id: string) => {
@@ -67,8 +81,8 @@ export default function PaymentsPage() {
                 <TableCell>{loan.borrowerName}</TableCell>
                 <TableCell>{loan.itemName}</TableCell>
                 <TableCell>{loan.dueDate ? formatFirestoreDate(loan.dueDate) : '-'}</TableCell>
-                <TableCell>₱{loan.monthlyDue?.toFixed(2)}</TableCell>
-                <TableCell>₱{loan.penalty?.toFixed(2) || '0.00'}</TableCell>
+                <TableCell>₱{(loan.monthlyDue || 0).toFixed(2)}</TableCell>
+                <TableCell>₱{(loan.penalty || 0).toFixed(2)}</TableCell>
                 <TableCell>
                   <Box 
                     component="span" 
@@ -119,7 +133,7 @@ export default function PaymentsPage() {
                 <TableCell>{formatFirestoreDate(payment.paymentDate)}</TableCell>
                 <TableCell>{payment.borrowerId}</TableCell>
                 <TableCell>{payment.loanId}</TableCell>
-                <TableCell>₱{payment.amountPaid.toFixed(2)}</TableCell>
+                <TableCell>₱{(payment.amountPaid || 0).toFixed(2)}</TableCell>
                 <TableCell>{payment.paymentMethod}</TableCell>
                 <TableCell>
                   <IconButton size="small" onClick={() => handleDelete(payment.id!)}>
