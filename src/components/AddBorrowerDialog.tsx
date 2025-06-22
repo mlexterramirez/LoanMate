@@ -24,8 +24,7 @@ export default function AddBorrowerDialog({
     workAddress: '',
     referenceContact1: { name: '', contact: '' },
     referenceContact2: { name: '', contact: '' },
-    photoURL: '',
-    birthdate: null
+    photoURL: ''
   });
 
   useEffect(() => {
@@ -38,8 +37,7 @@ export default function AddBorrowerDialog({
         workAddress: editBorrower.workAddress || '',
         referenceContact1: editBorrower.referenceContact1 || { name: '', contact: '' },
         referenceContact2: editBorrower.referenceContact2 || { name: '', contact: '' },
-        photoURL: editBorrower.photoURL || '',
-        birthdate: editBorrower.birthdate || null
+        photoURL: editBorrower.photoURL || ''
       });
     } else {
       setBorrower({ 
@@ -50,8 +48,7 @@ export default function AddBorrowerDialog({
         workAddress: '',
         referenceContact1: { name: '', contact: '' },
         referenceContact2: { name: '', contact: '' },
-        photoURL: '',
-        birthdate: null
+        photoURL: ''
       });
     }
   }, [editBorrower]);

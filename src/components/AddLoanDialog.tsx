@@ -85,9 +85,7 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
         ...loan,
         borrowerName: selectedBorrower?.fullName || '',
         monthlyDue: monthlyPayment,
-        paymentProgress: `0 of ${loan.terms} payments made`,
-        penalty: 0,
-        penaltyApplied: false
+        paymentProgress: `0 of ${loan.terms} payments made`
       });
       onLoanAdded();
       onClose();
@@ -135,7 +133,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
             ))}
           </Select>
         </FormControl>
-        
         <TextField
           fullWidth
           margin="normal"
@@ -145,7 +142,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
           onChange={handleChange}
           required
         />
-        
         <TextField
           fullWidth
           margin="normal"
@@ -156,7 +152,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
           onChange={handleChange}
           required
         />
-        
         <TextField
           fullWidth
           margin="normal"
@@ -167,7 +162,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
           onChange={handleChange}
           required
         />
-        
         <Grid container spacing={2}>
           <Grid item xs={6}>
             <TextField
@@ -194,7 +188,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
             />
           </Grid>
         </Grid>
-        
         <Grid container spacing={2}>
           <Grid item xs={6}>
             <TextField
@@ -225,7 +218,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
             />
           </Grid>
         </Grid>
-        
         <TextField
           fullWidth
           margin="normal"
@@ -236,7 +228,6 @@ export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDia
           multiline
           rows={3}
         />
-        
         <Box sx={{ mt: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
           <Typography variant="h6" gutterBottom>Loan Calculation</Typography>
           <Grid container spacing={2}>

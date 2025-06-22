@@ -1,35 +1,24 @@
-import { format } from "date-fns";
-import { Timestamp } from "firebase/firestore";
-
-export const formatDate = (date: Date | null): string => {
-  if (!date) return "";
-  return format(date, "MMM dd, yyyy");
+export const toDate = (timestamp: any): Date | null => {
+  if (!timestamp) return null;
+  try {
+    return timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  } catch (error) {
+    console.error('Error converting to date:', error);
+    return null;
+  }
 };
 
-export const formatFirestoreDate = (timestamp: any): string => {
-  if (!timestamp) return "";
-  
-  // Handle Firestore Timestamp
-  if (timestamp instanceof Timestamp) {
-    return format(timestamp.toDate(), "MMM dd, yyyy");
+export const formatFirestoreDate = (date: Date | null | undefined): string => {
+  if (!date) return 'N/A';
+  try {
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    }).format(date);
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'N/A';
   }
-  
-  // Handle JavaScript Date
-  if (timestamp instanceof Date) {
-    return format(timestamp, "MMM dd, yyyy");
-  }
-  
-  // Handle string representation
-  if (typeof timestamp === 'string') {
-    return format(new Date(timestamp), "MMM dd, yyyy");
-  }
-  
-  return "";
-};
-
-export const toDate = (input: any): Date => {
-  if (input instanceof Date) return input;
-  if (input instanceof Timestamp) return input.toDate();
-  if (typeof input === 'string') return new Date(input);
-  return new Date(); // Fallback to current date
 };
