@@ -7,9 +7,9 @@ import {
   InputAdornment, useTheme
 } from '@mui/material';
 import { Add, Search, Edit, Delete, Payment, Visibility } from '@mui/icons-material';
-import { useLoanService } from '../services/loans'; // Fixed import path
-import { Loan } from '../types'; // Removed LoanStatus import
-import { usePaymentService } from '../services/payments'; // Fixed import path
+import { useLoanService } from '../services/loans';
+import { Loan } from '../types';
+import { usePaymentService } from '../services/payments';
 import AddLoanDialog from '../components/AddLoanDialog';
 import AddPaymentDialog from '../components/AddPaymentDialog';
 import { calculateDaysLate, calculateTotalAmountDue } from '../utils/calculations';
@@ -36,8 +36,8 @@ const LoansPage: React.FC = () => {
 
   useEffect(() => {
     const filtered = loans.filter(loan => 
-      loan.borrowerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      loan.itemName.toLowerCase().includes(searchTerm.toLowerCase())
+      loan.borrowerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      loan.itemName?.toLowerCase().includes(searchTerm.toLowerCase())
     );
     setFilteredLoans(filtered);
   }, [searchTerm, loans]);
@@ -109,7 +109,7 @@ const LoansPage: React.FC = () => {
     }
   };
 
-  const getStatusColor = (status: string) => { // Changed from LoanStatus to string
+  const getStatusColor = (status: string) => {
     switch (status) {
       case 'Fully Paid':
         return theme.palette.success.main;
@@ -134,6 +134,13 @@ const LoansPage: React.FC = () => {
     const penaltyAmount = oldestBalance.penaltyAmount;
     
     return { daysLate, penaltyAmount };
+  };
+
+  // Convert values to numbers safely
+  const safeToNumber = (value: any): number => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') return parseFloat(value) || 0;
+    return 0;
   };
 
   return (
@@ -187,12 +194,15 @@ const LoansPage: React.FC = () => {
           <TableBody>
             {filteredLoans.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((loan) => {
               const { daysLate, penaltyAmount } = getLoanDetails(loan);
+              const totalPrice = safeToNumber(loan.totalPrice);
+              const totalPaid = safeToNumber(loan.totalPaid);
+              
               return (
                 <TableRow key={loan.id}>
                   <TableCell>{loan.borrowerName}</TableCell>
                   <TableCell>{loan.itemName}</TableCell>
-                  <TableCell align="right">₱{loan.totalPrice?.toFixed(2)}</TableCell>
-                  <TableCell align="right">₱{loan.totalPaid?.toFixed(2)}</TableCell>
+                  <TableCell align="right">₱{totalPrice.toFixed(2)}</TableCell>
+                  <TableCell align="right">₱{totalPaid.toFixed(2)}</TableCell>
                   <TableCell align="right">
                     {loan.dueDate?.toLocaleDateString() || 'N/A'}
                   </TableCell>
