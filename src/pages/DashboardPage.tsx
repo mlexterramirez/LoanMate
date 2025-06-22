@@ -4,7 +4,7 @@ import {
   TableContainer, TableHead, TableRow, Paper, Chip, CircularProgress, Alert 
 } from '@mui/material';
 import SummaryCard from '../components/SummaryCard';
-import { getLoans, checkAndUpdateOverdueLoans } from '../services/loans';
+import { getLoans } from '../services/loans';
 import { getPayments } from '../services/payments';
 import { getBorrowers } from '../services/borrowers';
 import { Loan, Borrower } from '../types';
@@ -49,29 +49,40 @@ export default function DashboardPage() {
         setLoading(true);
         setError(null);
         
-        await checkAndUpdateOverdueLoans();
         const [allLoans, allBorrowers, allPayments] = await Promise.all([
           getLoans(),
           getBorrowers(),
           getPayments()
         ]);
 
-        const collected = allPayments.reduce((sum: number, payment: any) => sum + (payment.amountPaid || 0), 0);
+        // Calculate summary stats
+        const collected = allPayments.reduce((sum: number, payment: any) => 
+          sum + (payment.amountPaid || 0), 0);
+        
         const outstanding = allLoans
           .filter(loan => loan.status !== 'Fully Paid')
-          .reduce((sum: number, loan: Loan) => sum + (loan.totalPrice || 0) - (loan.totalPaid || 0), 0);
+          .reduce((sum: number, loan: Loan) => 
+            sum + (loan.totalPrice || 0) - (loan.totalPaid || 0), 0);
         
         const today = new Date();
-        const upcoming = allLoans.filter(loan => 
-          loan.dueDate && 
-          loan.dueDate > today && 
-          loan.status !== 'Fully Paid'
-        ).length;
         
-        const late = allLoans.filter(loan => loan.status?.includes?.('Delayed')).length;
-        
-        const paymentsData = allLoans
-          .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
+        // Filter upcoming payments
+        const upcomingPaymentsData = allLoans
+          .filter(loan => {
+            if (loan.status === 'Fully Paid' || !loan.dueDate) return false;
+            
+            // Check if this due date has been paid
+            const loanPayments = allPayments
+              .filter(p => p.loanId === loan.id && p.paymentDate)
+              .sort((a, b) => 
+                new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
+              );
+            
+            // If there's a payment after this due date, skip it
+            return !loanPayments.some(payment => 
+              new Date(payment.paymentDate) > new Date(loan.dueDate)
+            );
+          })
           .map(loan => {
             const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
             return {
@@ -91,14 +102,14 @@ export default function DashboardPage() {
         setSummary({
           totalCollected: collected,
           totalOutstanding: outstanding,
-          upcomingDue: upcoming,
-          lateLoans: late,
+          upcomingDue: upcomingPaymentsData.length,
+          lateLoans: upcomingPaymentsData.filter(p => p.status === 'Late').length,
         });
         
         setLoans(allLoans);
         setBorrowers(allBorrowers);
         setPayments(allPayments);
-        setUpcomingPayments(paymentsData);
+        setUpcomingPayments(upcomingPaymentsData);
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
         setError('Failed to load dashboard data');
@@ -108,9 +119,6 @@ export default function DashboardPage() {
     };
     
     fetchData();
-    
-    const interval = setInterval(checkAndUpdateOverdueLoans, 60 * 60 * 1000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {

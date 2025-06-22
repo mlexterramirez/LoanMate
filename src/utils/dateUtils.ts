@@ -12,10 +12,10 @@ export const formatFirestoreDate = (date: Date | null | undefined): string => {
   if (!date) return 'N/A';
   try {
     if (isNaN(date.getTime())) return 'Invalid Date';
-    return new Intl.DateTimeFormat('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
     }).format(date);
   } catch (error) {
     console.error('Error formatting date:', error);

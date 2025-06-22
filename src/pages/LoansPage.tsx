@@ -5,25 +5,34 @@ import {
 } from '@mui/material';
 import { Add, Edit, Delete, Visibility, Event, Money, Warning } from '@mui/icons-material';
 import { getLoans, deleteLoan } from '../services/loans';
+import { getPayments } from '../services/payments'; // Import payments service
 import { Loan } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
 import AddLoanDialog from '../components/AddLoanDialog';
 
 export default function LoansPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
+  const [payments, setPayments] = useState<any[]>([]); // State for payments
   const [openDialog, setOpenDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLoans = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await getLoans();
-      setLoans(data);
+      
+      // Fetch both loans and payments in parallel
+      const [loansData, paymentsData] = await Promise.all([
+        getLoans(),
+        getPayments()
+      ]);
+      
+      setLoans(loansData);
+      setPayments(paymentsData);
     } catch (err) {
-      console.error('Error fetching loans:', err);
-      setError('Failed to load loans');
+      console.error('Error fetching data:', err);
+      setError('Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -32,7 +41,7 @@ export default function LoansPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteLoan(id);
-      await fetchLoans();
+      await fetchData(); // Refresh data after delete
     } catch (error) {
       console.error('Error deleting loan:', error);
       setError('Failed to delete loan');
@@ -62,8 +71,13 @@ export default function LoansPage() {
     return (loan.monthlyDue || 0) + penalty;
   };
 
+  // Calculate number of payments for a loan
+  const getPaymentCount = (loanId: string) => {
+    return payments.filter(payment => payment.loanId === loanId).length;
+  };
+
   useEffect(() => {
-    fetchLoans();
+    fetchData();
   }, []);
 
   if (loading) return <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />;
@@ -92,6 +106,7 @@ export default function LoansPage() {
               <TableCell>End Date</TableCell>
               <TableCell>Amount</TableCell>
               <TableCell>Downpayment</TableCell>
+              <TableCell>Paid</TableCell> {/* New Paid column */}
               <TableCell>Amount Due</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Late/Penalty</TableCell>
@@ -103,6 +118,7 @@ export default function LoansPage() {
               const endDate = calculateEndDate(loan.startDate || new Date(), loan.terms || 0);
               const daysLate = calculateDaysLate(loan.dueDate);
               const amountDue = calculateAmountDue(loan);
+              const paymentCount = getPaymentCount(loan.id || '');
               
               return (
                 <TableRow key={loan.id}>
@@ -112,6 +128,9 @@ export default function LoansPage() {
                   <TableCell>{formatFirestoreDate(endDate)}</TableCell>
                   <TableCell>₱{(loan.totalPrice || 0).toFixed(2)}</TableCell>
                   <TableCell>₱{(loan.downpayment || 0).toFixed(2)}</TableCell>
+                  <TableCell>
+                    {paymentCount}/{loan.terms || 0} {/* Paid status */}
+                  </TableCell>
                   <TableCell>₱{amountDue.toFixed(2)}</TableCell>
                   <TableCell>
                     <Chip 
@@ -146,7 +165,10 @@ export default function LoansPage() {
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Delete Loan">
-                      <IconButton size="small" onClick={() => loan.id && handleDelete(loan.id)}>
+                      <IconButton 
+                        size="small" 
+                        onClick={() => loan.id && handleDelete(loan.id)}
+                      >
                         <Delete fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -161,7 +183,7 @@ export default function LoansPage() {
       <AddLoanDialog 
         open={openDialog} 
         onClose={() => setOpenDialog(false)} 
-        onLoanAdded={fetchLoans}
+        onLoanAdded={fetchData}
       />
     </Box>
   );
