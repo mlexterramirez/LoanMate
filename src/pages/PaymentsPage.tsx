@@ -1,18 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Box, Button, Typography, Table, TableBody, TableCell, 
-  TableContainer, TableHead, TableRow, Paper, IconButton, 
-  CircularProgress, Alert, Tabs, Tab, Grid,
-  Chip // ADD THIS IMPORT
+  TableContainer, TableHead, TableRow, Paper, 
+  CircularProgress, Alert, Tabs, Tab, Chip
 } from '@mui/material';
 import { Add, Payment } from '@mui/icons-material';
 import { getLoans } from '../services/loans';
-import { getPayments, addPayment } from '../services/payments';
+import { getPayments } from '../services/payments';
 import { Loan, Payment as PaymentType } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
 import AddPaymentDialog from '../components/AddPaymentDialog';
+import { calculateNextDueDate, getDayWithSuffix } from '../utils/calculations';
 
-export default function PaymentPage() {
+export default function PaymentsPage() {
   const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
   const [paymentHistory, setPaymentHistory] = useState<PaymentType[]>([]);
   const [tabValue, setTabValue] = useState(0);
@@ -30,21 +30,29 @@ export default function PaymentPage() {
         getPayments()
       ]);
 
-      // Filter active loans that haven't been paid for the current due date
-      const filteredActiveLoans = allLoans.filter(loan => {
-        if (loan.status === 'Fully Paid' || !loan.dueDate) return false;
-        
-        const loanPayments = allPayments
-          .filter(p => p.loanId === loan.id && p.paymentDate)
-          .sort((a, b) => 
-            new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
-          );
-        
-        // Only show if there's no payment for this due date
-        return !loanPayments.some(payment => 
-          new Date(payment.paymentDate) > new Date(loan.dueDate)
-        );
-      });
+      // Filter active loans with next unpaid due date
+      const filteredActiveLoans = allLoans
+        .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
+        .map(loan => {
+          const loanPayments = allPayments
+            .filter(p => p.loanId === loan.id && p.paymentDate)
+            .sort((a, b) => 
+              new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
+            );
+          
+          // Calculate next unpaid due date
+          let nextDueDate = new Date(loan.dueDate);
+          if (loanPayments.length > 0) {
+            const lastPaymentDate = new Date(loanPayments[0].paymentDate);
+            nextDueDate = calculateNextDueDate(lastPaymentDate, new Date(loan.dueDate));
+          }
+          
+          return {
+            ...loan,
+            dueDate: nextDueDate
+          };
+        })
+        .filter(loan => loan.dueDate > new Date()); // Only show future due dates
 
       setActiveLoans(filteredActiveLoans);
       setPaymentHistory(allPayments);
@@ -111,7 +119,9 @@ export default function PaymentPage() {
                   <TableCell>{loan.borrowerName}</TableCell>
                   <TableCell>{loan.itemName}</TableCell>
                   <TableCell>
-                    {loan.dueDate ? formatFirestoreDate(loan.dueDate) : 'N/A'}
+                    {loan.dueDate ? 
+                      `${getDayWithSuffix(loan.dueDate)} of the month` : 
+                      'N/A'}
                   </TableCell>
                   <TableCell>₱{loan.monthlyDue?.toFixed(2) || '0.00'}</TableCell>
                   <TableCell>
@@ -145,13 +155,13 @@ export default function PaymentPage() {
                 <TableCell>Borrower</TableCell>
                 <TableCell>Loan Item</TableCell>
                 <TableCell>Amount</TableCell>
+                <TableCell>Penalty Paid</TableCell>
                 <TableCell>Method</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {paymentHistory.map(payment => {
-                // Find loan details for this payment
                 const loan = activeLoans.find(l => l.id === payment.loanId);
                 
                 return (
@@ -162,6 +172,7 @@ export default function PaymentPage() {
                     <TableCell>{loan?.borrowerName || 'Unknown'}</TableCell>
                     <TableCell>{loan?.itemName || 'Unknown'}</TableCell>
                     <TableCell>₱{payment.amountPaid?.toFixed(2) || '0.00'}</TableCell>
+                    <TableCell>₱{payment.penaltyPaid?.toFixed(2) || '0.00'}</TableCell>
                     <TableCell>{payment.paymentMethod || 'Cash'}</TableCell>
                     <TableCell>
                       {payment.paymentStatus === 'Full' ? (

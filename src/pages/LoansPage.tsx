@@ -3,16 +3,17 @@ import {
   Box, Button, Typography, Table, TableBody, TableCell, TableContainer, 
   TableHead, TableRow, Paper, IconButton, Chip, Tooltip, CircularProgress, Alert 
 } from '@mui/material';
-import { Add, Edit, Delete, Visibility, Event, Money, Warning } from '@mui/icons-material';
+import { Add, Edit, Delete, Visibility, Warning } from '@mui/icons-material';
 import { getLoans, deleteLoan } from '../services/loans';
-import { getPayments } from '../services/payments'; // Import payments service
+import { getPayments } from '../services/payments';
 import { Loan } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
+import { calculateTotalAmountDue, calculateDaysLate } from '../utils/calculations';
 import AddLoanDialog from '../components/AddLoanDialog';
 
 export default function LoansPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
-  const [payments, setPayments] = useState<any[]>([]); // State for payments
+  const [payments, setPayments] = useState<any[]>([]);
   const [openDialog, setOpenDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,13 +22,10 @@ export default function LoansPage() {
     try {
       setLoading(true);
       setError(null);
-      
-      // Fetch both loans and payments in parallel
       const [loansData, paymentsData] = await Promise.all([
         getLoans(),
         getPayments()
       ]);
-      
       setLoans(loansData);
       setPayments(paymentsData);
     } catch (err) {
@@ -41,7 +39,7 @@ export default function LoansPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteLoan(id);
-      await fetchData(); // Refresh data after delete
+      await fetchData();
     } catch (error) {
       console.error('Error deleting loan:', error);
       setError('Failed to delete loan');
@@ -54,26 +52,20 @@ export default function LoansPage() {
     return endDate;
   };
 
-  const calculateDaysLate = (dueDate?: Date) => {
-    if (!dueDate) return 0;
-    const today = new Date();
-    const diffTime = Math.max(0, today.getTime() - dueDate.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  };
-
-  const calculateAmountDue = (loan: Loan) => {
-    if (!loan.dueDate) return loan.monthlyDue || 0;
-    
-    const daysLate = calculateDaysLate(loan.dueDate);
-    const penaltyRate = 0.05;
-    const penalty = daysLate > 5 ? (loan.monthlyDue || 0) * penaltyRate * Math.floor(daysLate / 30) : 0;
-    
-    return (loan.monthlyDue || 0) + penalty;
-  };
-
-  // Calculate number of payments for a loan
   const getPaymentCount = (loanId: string) => {
     return payments.filter(payment => payment.loanId === loanId).length;
+  };
+
+  const getPenaltyDetails = (loan: Loan) => {
+    if (!loan.outstandingBalances || loan.outstandingBalances.length === 0) {
+      return { daysLate: 0, penaltyAmount: 0 };
+    }
+    
+    const oldestBalance = loan.outstandingBalances[0];
+    const daysLate = Math.max(0, calculateDaysLate(oldestBalance.dueDate) - 5;
+    const penaltyAmount = oldestBalance.penaltyAmount;
+    
+    return { daysLate, penaltyAmount };
   };
 
   useEffect(() => {
@@ -106,7 +98,7 @@ export default function LoansPage() {
               <TableCell>End Date</TableCell>
               <TableCell>Amount</TableCell>
               <TableCell>Downpayment</TableCell>
-              <TableCell>Paid</TableCell> {/* New Paid column */}
+              <TableCell>Paid</TableCell>
               <TableCell>Amount Due</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Late/Penalty</TableCell>
@@ -116,9 +108,9 @@ export default function LoansPage() {
           <TableBody>
             {loans.map((loan) => {
               const endDate = calculateEndDate(loan.startDate || new Date(), loan.terms || 0);
-              const daysLate = calculateDaysLate(loan.dueDate);
-              const amountDue = calculateAmountDue(loan);
               const paymentCount = getPaymentCount(loan.id || '');
+              const amountDue = calculateTotalAmountDue(loan);
+              const { daysLate, penaltyAmount } = getPenaltyDetails(loan);
               
               return (
                 <TableRow key={loan.id}>
@@ -126,10 +118,10 @@ export default function LoansPage() {
                   <TableCell>{loan.itemName}</TableCell>
                   <TableCell>{formatFirestoreDate(loan.startDate)}</TableCell>
                   <TableCell>{formatFirestoreDate(endDate)}</TableCell>
-                  <TableCell>₱{(loan.totalPrice || 0).toFixed(2)}</TableCell>
-                  <TableCell>₱{(loan.downpayment || 0).toFixed(2)}</TableCell>
+                  <TableCell>₱{(Number(loan.totalPrice) || 0).toFixed(2)}</TableCell>
+                  <TableCell>₱{(Number(loan.downpayment) || 0).toFixed(2)}</TableCell>
                   <TableCell>
-                    {paymentCount}/{loan.terms || 0} {/* Paid status */}
+                    {paymentCount}/{loan.terms || 0}
                   </TableCell>
                   <TableCell>₱{amountDue.toFixed(2)}</TableCell>
                   <TableCell>
@@ -143,10 +135,10 @@ export default function LoansPage() {
                   </TableCell>
                   <TableCell>
                     {daysLate > 0 ? (
-                      <Tooltip title={`${daysLate} days late`}>
+                      <Tooltip title={`${daysLate} days late - Penalty: ₱${penaltyAmount.toFixed(2)}`}>
                         <Chip 
                           icon={<Warning />}
-                          label={`${daysLate} days`}
+                          label={`${daysLate} days - ₱${penaltyAmount.toFixed(2)}`}
                           color="error"
                           size="small"
                         />

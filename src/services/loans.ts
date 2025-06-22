@@ -1,18 +1,21 @@
 import { db } from "../firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, getDoc, query, where, deleteDoc, Timestamp } from "firebase/firestore";
-import { Loan } from "../types";
-import { calculateMonthlyDue, calculatePenalty, getDaysOverdue } from "../utils/calculations";
+import { 
+  collection, addDoc, getDocs, doc, updateDoc, getDoc, 
+  query, where, deleteDoc, Timestamp 
+} from "firebase/firestore";
+import { Loan, OutstandingBalance } from "../types";
+import { calculateMonthlyDue, updateLoanStatus } from "../utils/calculations";
 import { getBorrower, updateBorrowerStats } from "./borrowers";
 import { toDate } from "../utils/dateUtils";
 
 const loansRef = collection(db, "loans");
 
-export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied'>) => {
+export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied' | 'outstandingBalances' | 'lastPaymentDate'>) => {
   try {
     const borrower = await getBorrower(loan.borrowerId);
     if (!borrower) throw new Error("Borrower not found");
 
-    const loanWithTimestamp: any = {
+    const loanWithDefaults: any = {
       ...loan,
       borrowerName: borrower.fullName || '',
       monthlyDue: calculateMonthlyDue(
@@ -25,17 +28,19 @@ export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | '
       totalPaid: 0,
       paymentProgress: `0 of ${loan.terms || 0} payments made`,
       penalty: 0,
-      penaltyApplied: false
+      penaltyApplied: false,
+      outstandingBalances: [],
+      lastPaymentDate: null
     };
 
     if (loan.startDate instanceof Date) {
-      loanWithTimestamp.startDate = Timestamp.fromDate(loan.startDate);
+      loanWithDefaults.startDate = Timestamp.fromDate(loan.startDate);
     }
     if (loan.dueDate instanceof Date) {
-      loanWithTimestamp.dueDate = Timestamp.fromDate(loan.dueDate);
+      loanWithDefaults.dueDate = Timestamp.fromDate(loan.dueDate);
     }
 
-    const newLoan = await addDoc(loansRef, loanWithTimestamp);
+    const newLoan = await addDoc(loansRef, loanWithDefaults);
     await updateBorrowerStats(loan.borrowerId, {
       totalLoans: (borrower.loanStats?.totalLoans || 0) + 1
     });
@@ -52,7 +57,7 @@ export const getLoans = async (): Promise<Loan[]> => {
     const snapshot = await getDocs(loansRef);
     return snapshot.docs.map(doc => {
       const data = doc.data();
-      return {
+      const loan: Loan = {
         id: doc.id,
         borrowerId: data.borrowerId || '',
         borrowerName: data.borrowerName || '',
@@ -69,8 +74,17 @@ export const getLoans = async (): Promise<Loan[]> => {
         status: data.status || 'Active',
         totalPaid: data.totalPaid || 0,
         penalty: data.penalty || 0,
-        penaltyApplied: data.penaltyApplied || false
+        penaltyApplied: data.penaltyApplied || false,
+        outstandingBalances: (data.outstandingBalances || []).map((b: any) => ({
+          dueDate: b.dueDate ? toDate(b.dueDate) : null,
+          baseAmount: b.baseAmount || 0,
+          penaltyAmount: b.penaltyAmount || 0
+        })),
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
       };
+      
+      // Update loan status with new penalty system
+      return updateLoanStatus(loan);
     });
   } catch (error) {
     console.error('Error fetching loans:', error);
@@ -84,7 +98,7 @@ export const getLoan = async (id: string): Promise<Loan | null> => {
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      return {
+      const loan: Loan = {
         id: docSnap.id,
         borrowerId: data.borrowerId || '',
         borrowerName: data.borrowerName || '',
@@ -101,8 +115,16 @@ export const getLoan = async (id: string): Promise<Loan | null> => {
         status: data.status || 'Active',
         totalPaid: data.totalPaid || 0,
         penalty: data.penalty || 0,
-        penaltyApplied: data.penaltyApplied || false
+        penaltyApplied: data.penaltyApplied || false,
+        outstandingBalances: (data.outstandingBalances || []).map((b: any) => ({
+          dueDate: b.dueDate ? toDate(b.dueDate) : null,
+          baseAmount: b.baseAmount || 0,
+          penaltyAmount: b.penaltyAmount || 0
+        })),
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
       };
+      
+      return updateLoanStatus(loan);
     }
     return null;
   } catch (error) {
@@ -116,11 +138,24 @@ export const updateLoan = async (id: string, updates: Partial<Loan>) => {
     const loanRef = doc(db, "loans", id);
     const dataToUpdate: any = { ...updates };
     
+    // Convert Date objects to Firestore Timestamps
     if (updates.startDate instanceof Date) {
       dataToUpdate.startDate = Timestamp.fromDate(updates.startDate);
     }
     if (updates.dueDate instanceof Date) {
       dataToUpdate.dueDate = Timestamp.fromDate(updates.dueDate);
+    }
+    if (updates.lastPaymentDate instanceof Date) {
+      dataToUpdate.lastPaymentDate = Timestamp.fromDate(updates.lastPaymentDate);
+    }
+    
+    // Convert outstandingBalances dates
+    if (updates.outstandingBalances) {
+      dataToUpdate.outstandingBalances = updates.outstandingBalances.map(balance => ({
+        ...balance,
+        dueDate: balance.dueDate instanceof Date ? 
+          Timestamp.fromDate(balance.dueDate) : balance.dueDate
+      }));
     }
     
     await updateDoc(loanRef, dataToUpdate);
@@ -146,7 +181,7 @@ export const getLoansByBorrower = async (borrowerId: string): Promise<Loan[]> =>
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => {
       const data = doc.data();
-      return {
+      const loan: Loan = {
         id: doc.id,
         borrowerId: data.borrowerId || '',
         borrowerName: data.borrowerName || '',
@@ -163,8 +198,15 @@ export const getLoansByBorrower = async (borrowerId: string): Promise<Loan[]> =>
         status: data.status || 'Active',
         totalPaid: data.totalPaid || 0,
         penalty: data.penalty || 0,
-        penaltyApplied: data.penaltyApplied || false
+        penaltyApplied: data.penaltyApplied || false,
+        outstandingBalances: (data.outstandingBalances || []).map((b: any) => ({
+          dueDate: b.dueDate ? toDate(b.dueDate) : null,
+          baseAmount: b.baseAmount || 0,
+          penaltyAmount: b.penaltyAmount || 0
+        })),
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
       };
+      return updateLoanStatus(loan);
     });
   } catch (error) {
     console.error('Error getting loans by borrower:', error);
@@ -180,26 +222,26 @@ export const checkAndUpdateOverdueLoans = async () => {
     for (const loan of loans) {
       if (loan.status === 'Fully Paid' || !loan.dueDate) continue;
       
-      const dueDate = loan.dueDate;
-      const overdueDate = new Date(dueDate);
-      overdueDate.setDate(overdueDate.getDate() + 5);
+      // Use the new penalty system to update loan status
+      const updatedLoan = updateLoanStatus(loan);
       
-      if (today > overdueDate && !loan.penaltyApplied) {
-        const daysOverdue = getDaysOverdue(dueDate);
-        const penalty = calculatePenalty(loan.monthlyDue || 0, daysOverdue);
-        
-        const borrower = await getBorrower(loan.borrowerId);
-        if (borrower) {
-          await updateBorrowerStats(loan.borrowerId, {
-            latePayments: (borrower.loanStats?.latePayments || 0) + 1
-          });
-        }
-        
+      // Only update if status changed
+      if (updatedLoan.status !== loan.status || updatedLoan.penalty !== loan.penalty || JSON.stringify(updatedLoan.outstandingBalances) !== JSON.stringify(loan.outstandingBalances)) {
         await updateLoan(loan.id!, {
-          status: `Delayed (${daysOverdue} days)`,
-          penalty: (loan.penalty || 0) + penalty,
-          penaltyApplied: true
+          status: updatedLoan.status,
+          penalty: updatedLoan.penalty,
+          outstandingBalances: updatedLoan.outstandingBalances
         });
+        
+        // Update borrower stats if loan became late
+        if (!loan.status.includes('Delayed') && updatedLoan.status.includes('Delayed')) {
+          const borrower = await getBorrower(loan.borrowerId);
+          if (borrower) {
+            await updateBorrowerStats(loan.borrowerId, {
+              latePayments: (borrower.loanStats?.latePayments || 0) + 1
+            });
+          }
+        }
       }
     }
   } catch (error) {

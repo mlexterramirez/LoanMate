@@ -1,17 +1,88 @@
 import { db } from "../firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, query, where, deleteDoc, Timestamp } from "firebase/firestore";
-import { Payment } from "../types";
+import { 
+  collection, addDoc, getDocs, doc, updateDoc, 
+  query, where, deleteDoc, Timestamp 
+} from "firebase/firestore";
+import { Payment, Loan } from "../types";
 import { getLoan, updateLoan } from "./loans";
 import { getBorrower, updateBorrowerStats } from "./borrowers";
 import { toDate } from "../utils/dateUtils";
+import { updateLoanStatus } from "../utils/calculations";
 
 const paymentsRef = collection(db, "payments");
 
 export const addPayment = async (payment: Omit<Payment, 'id'>) => {
   try {
+    const loan = await getLoan(payment.loanId);
+    if (!loan) throw new Error("Loan not found");
+    
+    // Apply payment to outstanding balances
+    let remainingPayment = payment.amountPaid;
+    const updatedBalances = [...(loan.outstandingBalances || [])];
+    let penaltyPaid = 0;
+    
+    // Pay oldest balances first
+    updatedBalances.sort((a, b) => 
+      (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0)
+    );
+    
+    for (let i = 0; i < updatedBalances.length && remainingPayment > 0; i++) {
+      const balance = updatedBalances[i];
+      const totalDue = balance.baseAmount + balance.penaltyAmount;
+      
+      if (remainingPayment >= totalDue) {
+        // Pay off this balance completely
+        remainingPayment -= totalDue;
+        penaltyPaid += balance.penaltyAmount;
+        updatedBalances.splice(i, 1);
+        i--; // Adjust index after removal
+      } else {
+        // Partially pay this balance
+        const baseRatio = balance.baseAmount / totalDue;
+        const penaltyRatio = balance.penaltyAmount / totalDue;
+        const basePaid = remainingPayment * baseRatio;
+        const penaltyPaidThis = remainingPayment * penaltyRatio;
+        
+        updatedBalances[i] = {
+          ...balance,
+          baseAmount: balance.baseAmount - basePaid,
+          penaltyAmount: balance.penaltyAmount - penaltyPaidThis
+        };
+        penaltyPaid += penaltyPaidThis;
+        remainingPayment = 0;
+      }
+    }
+    
+    // Update loan totals
+    const newTotalPaid = (loan.totalPaid || 0) + payment.amountPaid;
+    const updatedLoanData: Partial<Loan> = {
+      totalPaid: newTotalPaid,
+      outstandingBalances: updatedBalances,
+      lastPaymentDate: new Date()
+    };
+    
+    // Check if loan is fully paid
+    if (newTotalPaid >= loan.totalPrice) {
+      updatedLoanData.status = 'Fully Paid';
+    } else {
+      // Update the loan status (which may recalculate penalties and status)
+      const updatedLoan = updateLoanStatus({
+        ...loan,
+        ...updatedLoanData
+      });
+      updatedLoanData.status = updatedLoan.status;
+      updatedLoanData.penalty = updatedLoan.penalty;
+      updatedLoanData.outstandingBalances = updatedLoan.outstandingBalances;
+    }
+    
+    // Update loan in database
+    await updateLoan(loan.id!, updatedLoanData);
+    
+    // Create payment record
     const paymentData = {
       ...payment,
-      amountPaid: payment.amountPaid || 0,
+      amountPaid: payment.amountPaid,
+      penaltyPaid: penaltyPaid,
       paymentMethod: payment.paymentMethod || 'Cash',
       paymentStatus: payment.paymentStatus || 'Full',
       paymentDate: payment.paymentDate instanceof Date ? 
@@ -20,15 +91,7 @@ export const addPayment = async (payment: Omit<Payment, 'id'>) => {
     
     const paymentRef = await addDoc(paymentsRef, paymentData);
     
-    const loan = await getLoan(payment.loanId);
-    if (loan) {
-      const newTotalPaid = (loan.totalPaid || 0) + payment.amountPaid;
-      await updateLoan(loan.id!, {
-        totalPaid: newTotalPaid,
-        status: newTotalPaid >= (loan.totalPrice || 0) ? 'Fully Paid' : loan.status
-      });
-    }
-    
+    // Update borrower stats
     const borrower = await getBorrower(payment.borrowerId);
     if (borrower) {
       await updateBorrowerStats(payment.borrowerId, {
@@ -53,6 +116,7 @@ export const getPayments = async (): Promise<Payment[]> => {
         loanId: data.loanId || '',
         borrowerId: data.borrowerId || '',
         amountPaid: data.amountPaid || 0,
+        penaltyPaid: data.penaltyPaid || 0, // Added penaltyPaid field
         paymentMethod: data.paymentMethod || 'Cash',
         paymentStatus: data.paymentStatus || 'Full',
         paymentDate: data.paymentDate ? toDate(data.paymentDate) : null,
@@ -86,6 +150,7 @@ export const getPaymentsByLoan = async (loanId: string): Promise<Payment[]> => {
         loanId: data.loanId || '',
         borrowerId: data.borrowerId || '',
         amountPaid: data.amountPaid || 0,
+        penaltyPaid: data.penaltyPaid || 0,
         paymentMethod: data.paymentMethod || 'Cash',
         paymentStatus: data.paymentStatus || 'Full',
         paymentDate: data.paymentDate ? toDate(data.paymentDate) : null,

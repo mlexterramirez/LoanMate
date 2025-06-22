@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, 
-  TextField, Button, MenuItem, Select, InputLabel, FormControl, Box, Typography, Grid
+  TextField, Button, MenuItem, Select, InputLabel, 
+  FormControl, CircularProgress, Alert, Grid,
+  Box, Typography
 } from '@mui/material';
 import { Loan } from '../types';
 import { addLoan } from '../services/loans';
 import { getBorrowers } from '../services/borrowers';
-import { Borrower } from '../types';
-import { Timestamp } from "firebase/firestore";
-import { 
-  calculateMonthlyDue, 
-  calculateTotalInterest, 
-  calculateTotalAmountPayable 
-} from '../utils/calculations';
+import { formatFirestoreDate } from '../utils/dateUtils';
+import { getDayWithSuffix, calculateMonthlyDue } from '../utils/calculations';
 
 interface AddLoanDialogProps {
   open: boolean;
@@ -21,238 +18,290 @@ interface AddLoanDialogProps {
 }
 
 export default function AddLoanDialog({ open, onClose, onLoanAdded }: AddLoanDialogProps) {
-  const [loan, setLoan] = useState<Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied'>>({ 
+  const [formData, setFormData] = useState<Omit<Loan, 'id'>>({
     borrowerId: '',
     borrowerName: '',
     itemName: '',
     totalPrice: 0,
     downpayment: 0,
-    terms: 3,
-    monthlyInterestPct: 5,
+    terms: 0,
+    monthlyInterestPct: 0,
     startDate: new Date(),
     dueDate: new Date(),
     monthlyDue: 0,
-    paymentProgress: '0 of 0 payments made',
-    notes: ''
+    status: 'Active',
+    totalPaid: 0,
+    penalty: 0,
+    penaltyApplied: false,
+    outstandingBalances: []
   });
-  const [borrowers, setBorrowers] = useState<Borrower[]>([]);
-  const [monthlyPayment, setMonthlyPayment] = useState(0);
-  const [totalInterest, setTotalInterest] = useState(0);
-  const [totalAmount, setTotalAmount] = useState(0);
+  
+  const [endDate, setEndDate] = useState<string>('');
+  const [dueDaySuffix, setDueDaySuffix] = useState<string>('');
+  const [borrowers, setBorrowers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchBorrowers = async () => {
-      const data = await getBorrowers();
-      setBorrowers(data);
+      try {
+        const data = await getBorrowers();
+        setBorrowers(data);
+      } catch (err) {
+        setError('Failed to load borrowers');
+      } finally {
+        setLoading(false);
+      }
     };
     fetchBorrowers();
   }, []);
 
   useEffect(() => {
-    const calculate = () => {
-      const monthly = calculateMonthlyDue(
-        loan.totalPrice,
-        loan.downpayment,
-        loan.terms,
-        loan.monthlyInterestPct
-      );
-      const interest = calculateTotalInterest(
-        loan.totalPrice,
-        loan.downpayment,
-        loan.terms,
-        loan.monthlyInterestPct
-      );
-      const amount = calculateTotalAmountPayable(
-        loan.totalPrice,
-        loan.downpayment,
-        loan.terms,
-        loan.monthlyInterestPct
-      );
-      
-      setMonthlyPayment(monthly);
-      setTotalInterest(interest);
-      setTotalAmount(amount);
-    };
+    if (formData.terms > 0 && formData.startDate) {
+      const endDate = new Date(formData.startDate);
+      endDate.setMonth(endDate.getMonth() + parseInt(formData.terms.toString()));
+      setEndDate(formatFirestoreDate(endDate));
+    }
     
-    calculate();
-  }, [loan]);
+    // Calculate due day suffix
+    if (formData.dueDate) {
+      setDueDaySuffix(getDayWithSuffix(new Date(formData.dueDate)));
+    }
+
+    // Calculate monthly due if relevant fields change
+    if (formData.totalPrice > 0 && formData.terms > 0 && formData.monthlyInterestPct > 0) {
+      const monthlyDue = calculateMonthlyDue(
+        Number(formData.totalPrice),
+        Number(formData.downpayment),
+        Number(formData.terms),
+        Number(formData.monthlyInterestPct)
+      );
+      setFormData(prev => ({
+        ...prev,
+        monthlyDue: monthlyDue
+      }));
+    }
+  }, [formData.terms, formData.startDate, formData.dueDate, formData.totalPrice, formData.downpayment, formData.monthlyInterestPct]);
 
   const handleSubmit = async () => {
     try {
-      const selectedBorrower = borrowers.find(b => b.id === loan.borrowerId);
+      setError(null);
       
-      await addLoan({
-        ...loan,
-        borrowerName: selectedBorrower?.fullName || '',
-        monthlyDue: monthlyPayment,
-        paymentProgress: `0 of ${loan.terms} payments made`
-      });
+      // Ensure numeric fields are numbers
+      const loanData = {
+        ...formData,
+        totalPrice: Number(formData.totalPrice),
+        downpayment: Number(formData.downpayment),
+        terms: Number(formData.terms),
+        monthlyInterestPct: Number(formData.monthlyInterestPct),
+        monthlyDue: Number(formData.monthlyDue),
+        outstandingBalances: []
+      };
+      
+      await addLoan(loanData);
       onLoanAdded();
       onClose();
-    } catch (error) {
-      console.error('Error adding loan:', error);
+    } catch (err) {
+      setError('Failed to create loan');
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setLoan({
-      ...loan,
-      [name]: name === 'totalPrice' || name === 'downpayment' || name === 'terms' || name === 'monthlyInterestPct' 
-        ? Number(value) 
-        : value
-    });
+    
+    // Convert numeric fields to numbers
+    const numericFields = ['totalPrice', 'downpayment', 'terms', 'monthlyInterestPct'];
+    let newValue: any = value;
+    
+    if (name.includes('Date')) {
+      newValue = new Date(value);
+    } else if (numericFields.includes(name)) {
+      newValue = value === '' ? 0 : Number(value);
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      [name]: newValue
+    }));
   };
 
-  const handleDateChange = (name: string, date: Date | null) => {
-    if (date) {
-      setLoan({
-        ...loan,
-        [name]: date
-      });
-    }
+  const handleSelectChange = (e: any) => {
+    const borrowerId = e.target.value;
+    const borrower = borrowers.find(b => b.id === borrowerId);
+    setFormData(prev => ({
+      ...prev,
+      borrowerId,
+      borrowerName: borrower?.fullName || ''
+    }));
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>Add New Loan</DialogTitle>
       <DialogContent>
-        <FormControl fullWidth margin="normal">
-          <InputLabel id="borrower-label">Borrower</InputLabel>
-          <Select
-            labelId="borrower-label"
-            name="borrowerId"
-            value={loan.borrowerId}
-            onChange={(e) => setLoan({...loan, borrowerId: e.target.value as string})}
-            required
-          >
-            {borrowers.map((borrower) => (
-              <MenuItem key={borrower.id} value={borrower.id}>
-                {borrower.fullName}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <TextField
-          fullWidth
-          margin="normal"
-          label="Item Name"
-          name="itemName"
-          value={loan.itemName}
-          onChange={handleChange}
-          required
-        />
-        <TextField
-          fullWidth
-          margin="normal"
-          label="Total Price (₱)"
-          name="totalPrice"
-          type="number"
-          value={loan.totalPrice}
-          onChange={handleChange}
-          required
-        />
-        <TextField
-          fullWidth
-          margin="normal"
-          label="Downpayment (₱)"
-          name="downpayment"
-          type="number"
-          value={loan.downpayment}
-          onChange={handleChange}
-          required
-        />
-        <Grid container spacing={2}>
-          <Grid item xs={6}>
-            <TextField
-              fullWidth
-              margin="normal"
-              label="Terms (months)"
-              name="terms"
-              type="number"
-              value={loan.terms}
-              onChange={handleChange}
-              required
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              fullWidth
-              margin="normal"
-              label="Monthly Interest (%)"
-              name="monthlyInterestPct"
-              type="number"
-              value={loan.monthlyInterestPct}
-              onChange={handleChange}
-              required
-            />
-          </Grid>
-        </Grid>
-        <Grid container spacing={2}>
-          <Grid item xs={6}>
-            <TextField
-              fullWidth
-              margin="normal"
-              label="Start Date"
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={loan.startDate.toISOString().split('T')[0]}
-              onChange={(e) => 
-                handleDateChange('startDate', e.target.value ? new Date(e.target.value) : new Date())
-              }
-              required
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              fullWidth
-              margin="normal"
-              label="Due Date"
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={loan.dueDate.toISOString().split('T')[0]}
-              onChange={(e) => 
-                handleDateChange('dueDate', e.target.value ? new Date(e.target.value) : new Date())
-              }
-              required
-            />
-          </Grid>
-        </Grid>
-        <TextField
-          fullWidth
-          margin="normal"
-          label="Notes"
-          name="notes"
-          value={loan.notes}
-          onChange={handleChange}
-          multiline
-          rows={3}
-        />
-        <Box sx={{ mt: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-          <Typography variant="h6" gutterBottom>Loan Calculation</Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <Typography>Principal Amount:</Typography>
-              <Typography>Monthly Interest:</Typography>
-              <Typography>Loan Term:</Typography>
-              <Typography variant="subtitle1">Monthly Payment:</Typography>
-              <Typography>Total Interest:</Typography>
-              <Typography variant="subtitle1">Total Amount Payable:</Typography>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {loading ? (
+          <CircularProgress sx={{ display: 'block', mx: 'auto', my: 2 }} />
+        ) : (
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth margin="dense">
+                <InputLabel>Borrower</InputLabel>
+                <Select
+                  value={formData.borrowerId}
+                  onChange={handleSelectChange}
+                  required
+                >
+                  {borrowers.map(borrower => (
+                    <MenuItem key={borrower.id} value={borrower.id}>
+                      {borrower.fullName}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
-            <Grid item xs={6} sx={{ textAlign: 'right' }}>
-              <Typography>₱{(loan.totalPrice - loan.downpayment).toFixed(2)}</Typography>
-              <Typography>{loan.monthlyInterestPct}%</Typography>
-              <Typography>{loan.terms} months</Typography>
-              <Typography variant="subtitle1">₱{monthlyPayment.toFixed(2)}</Typography>
-              <Typography>₱{totalInterest.toFixed(2)}</Typography>
-              <Typography variant="subtitle1">₱{totalAmount.toFixed(2)}</Typography>
+            
+            <Grid item xs={12} md={6}>
+              <TextField
+                name="itemName"
+                label="Item Name"
+                fullWidth
+                margin="dense"
+                value={formData.itemName}
+                onChange={handleChange}
+                required
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="totalPrice"
+                label="Total Price (₱)"
+                type="number"
+                fullWidth
+                margin="dense"
+                value={formData.totalPrice}
+                onChange={handleChange}
+                required
+                inputProps={{ min: 0 }}
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="downpayment"
+                label="Downpayment (₱)"
+                type="number"
+                fullWidth
+                margin="dense"
+                value={formData.downpayment}
+                onChange={handleChange}
+                required
+                inputProps={{ min: 0 }}
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="terms"
+                label="Terms (Months)"
+                type="number"
+                fullWidth
+                margin="dense"
+                value={formData.terms}
+                onChange={handleChange}
+                required
+                inputProps={{ min: 1 }}
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="monthlyInterestPct"
+                label="Monthly Interest (%)"
+                type="number"
+                fullWidth
+                margin="dense"
+                value={formData.monthlyInterestPct}
+                onChange={handleChange}
+                required
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="startDate"
+                label="Start Date"
+                type="date"
+                fullWidth
+                margin="dense"
+                InputLabelProps={{ shrink: true }}
+                value={formData.startDate.toISOString().split('T')[0]}
+                onChange={handleChange}
+                required
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="dueDate"
+                label="First Due Date"
+                type="date"
+                fullWidth
+                margin="dense"
+                InputLabelProps={{ shrink: true }}
+                value={formData.dueDate.toISOString().split('T')[0]}
+                onChange={handleChange}
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <TextField
+                name="monthlyDue"
+                label="Monthly Due (₱)"
+                type="number"
+                fullWidth
+                margin="dense"
+                value={formData.monthlyDue.toFixed(2)}
+                InputProps={{
+                  readOnly: true,
+                }}
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <Box sx={{ p: 2, border: '1px dashed #ccc', borderRadius: 1, mt: 2 }}>
+                <Typography variant="h6" gutterBottom>Loan Summary</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={4}>
+                    <Typography>Loan Term: {formData.terms} months</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>Start Date: {formatFirestoreDate(formData.startDate)}</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>End Date: {endDate || 'N/A'}</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>Payment Day: {dueDaySuffix || 'Not set'}</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>Monthly Due: ₱{formData.monthlyDue.toFixed(2)}</Typography>
+                  </Grid>
+                </Grid>
+              </Box>
             </Grid>
           </Grid>
-        </Box>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained">
+        <Button 
+          onClick={handleSubmit} 
+          variant="contained" 
+          disabled={!formData.borrowerId || !formData.itemName}
+        >
           Add Loan
         </Button>
       </DialogActions>
