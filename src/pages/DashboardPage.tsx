@@ -73,19 +73,21 @@ export default function DashboardPage() {
             const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
             const loanPayments = allPayments
               .filter(p => p.loanId === loan.id && p.paymentDate)
-              .sort((a, b) => 
-                new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
-              );
+              .sort((a, b) => {
+                const aDate = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
+                const bDate = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
+                return bDate.getTime() - aDate.getTime();
+              });
             
             // Find the next unpaid due date
-            let nextDueDate = new Date(loan.dueDate);
-            if (loanPayments.length > 0) {
+            let nextDueDate = loan.dueDate ? new Date(loan.dueDate) : null;
+            if (loanPayments.length > 0 && loanPayments[0].paymentDate) {
               const lastPaymentDate = new Date(loanPayments[0].paymentDate);
-              nextDueDate = calculateNextDueDate(lastPaymentDate, new Date(loan.dueDate));
+              nextDueDate = calculateNextDueDate(lastPaymentDate);
             }
             
             // Only show if next due date is in the future
-            if (nextDueDate < today) return null;
+            if (!nextDueDate || nextDueDate < today) return null;
 
             return {
               borrowerId: loan.borrowerId || '',

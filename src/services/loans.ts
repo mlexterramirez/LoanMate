@@ -248,3 +248,15 @@ export const checkAndUpdateOverdueLoans = async () => {
     console.error('Error checking overdue loans:', error);
   }
 };
+
+export const useLoanService = () => {
+  return {
+    getLoans,
+    getLoan,
+    addLoan,
+    updateLoan,
+    deleteLoan,
+    getLoansByBorrower,
+    checkAndUpdateOverdueLoans
+  };
+};

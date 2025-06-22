@@ -19,6 +19,7 @@ export default function PaymentsPage() {
   const [openDialog, setOpenDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
 
   const fetchData = async () => {
     try {
@@ -36,15 +37,17 @@ export default function PaymentsPage() {
         .map(loan => {
           const loanPayments = allPayments
             .filter(p => p.loanId === loan.id && p.paymentDate)
-            .sort((a, b) => 
-              new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
-            );
+            .sort((a, b) => {
+              const aDate = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
+              const bDate = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
+              return bDate.getTime() - aDate.getTime();
+            });
           
           // Calculate next unpaid due date
-          let nextDueDate = new Date(loan.dueDate);
-          if (loanPayments.length > 0) {
+          let nextDueDate = loan.dueDate ? new Date(loan.dueDate) : null;
+          if (loanPayments.length > 0 && loanPayments[0].paymentDate) {
             const lastPaymentDate = new Date(loanPayments[0].paymentDate);
-            nextDueDate = calculateNextDueDate(lastPaymentDate, new Date(loan.dueDate));
+            nextDueDate = calculateNextDueDate(lastPaymentDate);
           }
           
           return {
@@ -52,7 +55,7 @@ export default function PaymentsPage() {
             dueDate: nextDueDate
           };
         })
-        .filter(loan => loan.dueDate > new Date()); // Only show future due dates
+        .filter(loan => loan.dueDate && loan.dueDate > new Date()); // Only show future due dates
 
       setActiveLoans(filteredActiveLoans);
       setPaymentHistory(allPayments);
@@ -72,9 +75,15 @@ export default function PaymentsPage() {
     setTabValue(newValue);
   };
 
+  const handleAddPayment = (loan: Loan) => {
+    setSelectedLoan(loan);
+    setOpenDialog(true);
+  };
+
   const handlePaymentAdded = () => {
     fetchData();
     setOpenDialog(false);
+    setSelectedLoan(null);
   };
 
   if (loading) return <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />;
@@ -136,7 +145,7 @@ export default function PaymentsPage() {
                       variant="outlined"
                       size="small"
                       startIcon={<Payment />}
-                      onClick={() => setOpenDialog(true)}
+                      onClick={() => handleAddPayment(loan)}
                     >
                       Pay Now
                     </Button>
@@ -189,11 +198,18 @@ export default function PaymentsPage() {
         </TableContainer>
       )}
 
-      <AddPaymentDialog 
-        open={openDialog} 
-        onClose={() => setOpenDialog(false)} 
-        onPaymentAdded={handlePaymentAdded}
-      />
+      {selectedLoan && (
+        <AddPaymentDialog 
+          open={openDialog} 
+          onClose={() => {
+            setOpenDialog(false);
+            setSelectedLoan(null);
+          }}
+          onPaymentAdded={handlePaymentAdded}
+          loan={selectedLoan}
+          loans={activeLoans}
+        />
+      )}
     </Box>
   );
 }

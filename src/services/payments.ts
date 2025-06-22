@@ -171,4 +171,14 @@ export const getTotalPaidByLoan = async (loanId: string): Promise<number> => {
     console.error('Error getting total paid by loan:', error);
     return 0;
   }
+
+};
+export const usePaymentService = () => {
+  return {
+    addPayment,
+    getPayments,
+    deletePayment,
+    getPaymentsByLoan,
+    getTotalPaidByLoan
+  };
 };

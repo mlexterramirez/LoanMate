@@ -1,4 +1,4 @@
-import { Loan, OutstandingBalance } from "../types";
+import { Loan, OutstandingBalance } from '../types';
 
 export const calculateMonthlyDue = (
   totalPrice: number,
@@ -6,37 +6,43 @@ export const calculateMonthlyDue = (
   terms: number,
   monthlyInterestPct: number
 ): number => {
-  const principal = totalPrice - downpayment;
+  const financedAmount = totalPrice - downpayment;
   const monthlyInterest = monthlyInterestPct / 100;
+  const numerator = financedAmount * monthlyInterest * Math.pow(1 + monthlyInterest, terms);
+  const denominator = Math.pow(1 + monthlyInterest, terms) - 1;
   
-  return (principal * monthlyInterest) / 
-    (1 - Math.pow(1 + monthlyInterest, -terms));
+  return numerator / denominator;
 };
 
-export const calculatePenaltyForBalance = (balance: number, daysOverdue: number): number => {
-  const penaltyRate = 0.03; // 3% penalty
-  const penaltyMonths = Math.max(1, Math.floor(daysOverdue / 30));
-  return balance * penaltyRate * penaltyMonths;
+export const calculateDaysLate = (dueDate?: Date | null): number => {
+  if (!dueDate) return 0;
+  
+  const today = new Date();
+  const timeDiff = today.getTime() - dueDate.getTime();
+  return Math.max(0, Math.floor(timeDiff / (1000 * 60 * 60 * 24)));
 };
 
 export const calculateTotalAmountDue = (loan: Loan): number => {
   if (!loan.outstandingBalances || loan.outstandingBalances.length === 0) {
-    return loan.monthlyDue;
+    return 0;
   }
   
-  const today = new Date();
   return loan.outstandingBalances.reduce((total, balance) => {
-    const daysLate = Math.max(0, Math.floor((today.getTime() - balance.dueDate.getTime()) / (1000 * 60 * 60 * 24)) - 5;
-    const penalty = daysLate > 0 ? calculatePenaltyForBalance(balance.baseAmount, daysLate) : 0;
-    return total + balance.baseAmount + penalty;
+    return total + balance.baseAmount + balance.penaltyAmount;
   }, 0);
+};
+
+export const calculatePenaltyForBalance = (baseAmount: number, daysLate: number): number => {
+  const monthsLate = Math.ceil(daysLate / 30);
+  const penaltyRate = 0.03; // 3% per month
+  return baseAmount * penaltyRate * monthsLate;
 };
 
 export const updateLoanStatus = (loan: Loan): Loan => {
   const today = new Date();
   
   // Check if fully paid
-  if (loan.totalPaid >= loan.totalPrice) {
+  if ((loan.totalPaid || 0) >= loan.totalPrice) {
     return {
       ...loan,
       status: 'Fully Paid',
@@ -45,29 +51,40 @@ export const updateLoanStatus = (loan: Loan): Loan => {
     };
   }
   
-  // Initialize outstandingBalances if not exists
-  const outstandingBalances = loan.outstandingBalances || [];
+  let outstandingBalances = [...(loan.outstandingBalances || [])];
   
-  // Check if current due date is passed and not paid
-  if (loan.dueDate < today) {
-    const existingBalance = outstandingBalances.find(b => 
-      b.dueDate.getTime() === loan.dueDate.getTime()
-    );
+  // Add new outstanding balance if due date has passed and no payment has been made
+  if (loan.dueDate && loan.dueDate < today) {
+    const lastDueDate = new Date(loan.dueDate);
+    const daysSinceLastDue = Math.floor((today.getTime() - lastDueDate.getTime()) / (1000 * 60 * 60 * 24));
     
-    if (!existingBalance) {
-      // Add new outstanding balance
-      outstandingBalances.push({
-        dueDate: new Date(loan.dueDate),
-        baseAmount: loan.monthlyDue,
-        penaltyAmount: 0
-      });
+    // Only add new balance if it's been more than 30 days since last addition
+    if (daysSinceLastDue >= 30) {
+      const monthsPassed = Math.floor(daysSinceLastDue / 30);
+      
+      for (let i = 0; i < monthsPassed; i++) {
+        const newDueDate = new Date(lastDueDate);
+        newDueDate.setMonth(newDueDate.getMonth() + i + 1);
+        
+        // Only add if not already in outstandingBalances
+        if (!outstandingBalances.some(b => 
+          b.dueDate?.getTime() === newDueDate.getTime() && 
+          b.baseAmount === loan.monthlyDue
+        )) {
+          outstandingBalances.push({
+            dueDate: newDueDate,
+            baseAmount: loan.monthlyDue,
+            penaltyAmount: 0
+          });
+        }
+      }
     }
   }
   
-  // Calculate total penalty
+  // Calculate penalties for each outstanding balance
   let totalPenalty = 0;
   const updatedBalances = outstandingBalances.map(balance => {
-    const daysLate = Math.max(0, Math.floor((today.getTime() - balance.dueDate.getTime()) / (1000 * 60 * 60 * 24)) - 5;
+    const daysLate = Math.max(0, calculateDaysLate(balance.dueDate) - 5);
     const penalty = daysLate > 0 ? calculatePenaltyForBalance(balance.baseAmount, daysLate) : 0;
     totalPenalty += penalty;
     return {
@@ -76,50 +93,35 @@ export const updateLoanStatus = (loan: Loan): Loan => {
     };
   });
   
-  // Determine status
+  // Update loan status based on oldest balance
   let status = 'Active';
   if (updatedBalances.length > 0) {
-    const daysLate = Math.max(0, Math.floor((today.getTime() - updatedBalances[0].dueDate.getTime()) / (1000 * 60 * 60 * 24)) - 5;
+    const daysLate = Math.max(0, calculateDaysLate(updatedBalances[0].dueDate) - 5);
     status = daysLate > 30 ? 'Severely Delayed' : `Delayed (${daysLate} days)`;
   }
   
   return {
     ...loan,
-    outstandingBalances: updatedBalances,
+    status,
     penalty: totalPenalty,
-    status
+    outstandingBalances: updatedBalances
   };
 };
 
-export const calculateNextDueDate = (lastPaymentDate: Date, originalDueDate: Date): Date => {
-  const dueDay = originalDueDate.getDate();
-  const nextDue = new Date(lastPaymentDate);
-  nextDue.setMonth(nextDue.getMonth() + 1);
-  const nextMonth = nextDue.getMonth();
-  const nextYear = nextDue.getFullYear();
-  const lastDayOfNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
-  const nextDueDay = Math.min(dueDay, lastDayOfNextMonth);
-  return new Date(nextYear, nextMonth, nextDueDay);
+export const calculateNextDueDate = (lastPaymentDate?: Date | null): Date => {
+  const nextDueDate = lastPaymentDate ? new Date(lastPaymentDate) : new Date();
+  nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+  return nextDueDate;
 };
 
-export const getDayWithSuffix = (date: Date) => {
+// Add the missing function
+export const getDayWithSuffix = (date: Date): string => {
   const day = date.getDate();
-  if (day > 3 && day < 21) return `${day}th`;
+  if (day > 3 && day < 21) return day + 'th';
   switch (day % 10) {
-    case 1: return `${day}st`;
-    case 2: return `${day}nd`;
-    case 3: return `${day}rd`;
-    default: return `${day}th`;
+    case 1: return day + 'st';
+    case 2: return day + 'nd';
+    case 3: return day + 'rd';
+    default: return day + 'th';
   }
-};
-
-export const calculateDaysLate = (dueDate?: Date) => {
-  if (!dueDate) return 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate);
-  due.setHours(0, 0, 0, 0);
-  
-  const diffTime = Math.max(0, today.getTime() - due.getTime());
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
