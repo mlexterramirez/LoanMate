@@ -50,13 +50,12 @@ export interface Payment {
   id?: string;
   loanId: string;
   borrowerId: string;
-  paymentDate: any; 
   amountPaid: number;
-  paymentMethod: 'Cash' | 'Bank Transfer' | 'Check';
-  paymentStatus: 'Full' | 'Partial';
-  
-  // New field for penalty tracking
   penaltyPaid: number;
+  paymentMethod: string;
+  paymentStatus: 'Full' | 'Partial';
+  paymentDate: Date | null;
+  notes: string; // Add this line
 }
 
 // New type for outstanding balances
