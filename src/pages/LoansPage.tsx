@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { 
   Container, Typography, Button, Paper, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, TablePagination, Grid, IconButton, 
@@ -7,16 +6,16 @@ import {
   InputAdornment, useTheme
 } from '@mui/material';
 import { Add, Search, Edit, Delete, Payment, Visibility } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useLoanService } from '../services/loans';
 import { Loan } from '../types';
 import { usePaymentService } from '../services/payments';
 import AddLoanDialog from '../components/AddLoanDialog';
 import AddPaymentDialog from '../components/AddPaymentDialog';
-import { calculateDaysLate, calculateTotalAmountDue } from '../utils/calculations';
+import { calculateDaysLate, calculatePaidInstallments, calculateEndDueDate } from '../utils/calculations';
 
 const LoansPage: React.FC = () => {
   const { getLoans, deleteLoan } = useLoanService();
-  const { getPaymentsByLoan } = usePaymentService();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [filteredLoans, setFilteredLoans] = useState<Loan[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -186,7 +185,8 @@ const LoansPage: React.FC = () => {
               <TableCell>Item</TableCell>
               <TableCell align="right">Loan Amount</TableCell>
               <TableCell align="right">Paid</TableCell>
-              <TableCell align="right">Due Date</TableCell>
+              <TableCell align="right">First Due</TableCell>
+              <TableCell align="right">End Due</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
@@ -196,15 +196,24 @@ const LoansPage: React.FC = () => {
               const { daysLate, penaltyAmount } = getLoanDetails(loan);
               const totalPrice = safeToNumber(loan.totalPrice);
               const totalPaid = safeToNumber(loan.totalPaid);
+              const paidInstallments = calculatePaidInstallments(loan);
+              const totalInstallments = loan.terms || 0;
+              const endDueDate = calculateEndDueDate(loan);
               
               return (
                 <TableRow key={loan.id}>
                   <TableCell>{loan.borrowerName}</TableCell>
                   <TableCell>{loan.itemName}</TableCell>
                   <TableCell align="right">₱{totalPrice.toFixed(2)}</TableCell>
-                  <TableCell align="right">₱{totalPaid.toFixed(2)}</TableCell>
                   <TableCell align="right">
-                    {loan.dueDate?.toLocaleDateString() || 'N/A'}
+                    ₱{totalPaid.toFixed(2)} <br />
+                    <small>({paidInstallments}/{totalInstallments} months)</small>
+                  </TableCell>
+                  <TableCell align="right">
+                    {loan.firstDueDate ? new Date(loan.firstDueDate).toLocaleDateString() : 'N/A'}
+                  </TableCell>
+                  <TableCell align="right">
+                    {endDueDate ? endDueDate.toLocaleDateString() : 'N/A'}
                   </TableCell>
                   <TableCell>
                     <Box 

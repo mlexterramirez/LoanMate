@@ -39,16 +39,15 @@ export const calculatePenaltyForBalance = (baseAmount: number, daysLate: number)
 };
 
 export const generateInstallments = (
-  startDate: Date,
+  firstDueDate: Date,
   terms: number,
   monthlyDue: number
 ): Installment[] => {
   const installments: Installment[] = [];
-  const dueDate = new Date(startDate);
 
   for (let i = 0; i < terms; i++) {
-    const installmentDueDate = new Date(dueDate);
-    installmentDueDate.setMonth(dueDate.getMonth() + i + 1);
+    const installmentDueDate = new Date(firstDueDate);
+    installmentDueDate.setMonth(firstDueDate.getMonth() + i);
     
     installments.push({
       id: `installment_${i+1}`,
@@ -65,6 +64,15 @@ export const generateInstallments = (
 export const calculatePaidInstallments = (loan: Loan): number => {
   if (!loan.installments) return 0;
   return loan.installments.filter(inst => inst.status === 'paid').length;
+};
+
+export const calculateEndDueDate = (loan: Loan): Date | null => {
+  if (!loan.firstDueDate || !loan.terms) return null;
+  
+  const firstDue = new Date(loan.firstDueDate);
+  const endDate = new Date(firstDue);
+  endDate.setMonth(firstDue.getMonth() + loan.terms - 1);
+  return endDate;
 };
 
 export const getNextUnpaidDueDate = (loan: Loan): Date | null => {
@@ -107,8 +115,8 @@ export const updateLoanStatus = (loan: Loan): Loan => {
   
   let outstandingBalances = [...(loan.outstandingBalances || [])];
   
-  if (loan.dueDate) {
-    const loanDueDate = new Date(loan.dueDate);
+  if (loan.firstDueDate) {
+    const loanDueDate = new Date(loan.firstDueDate);
     loanDueDate.setHours(0, 0, 0, 0);
     
     if (loanDueDate < today) {
@@ -169,14 +177,6 @@ export const updateLoanStatus = (loan: Loan): Loan => {
     penalty: totalPenalty,
     outstandingBalances: updatedBalances
   };
-};
-
-export const calculateNextDueDate = (lastPaymentDate?: Date | null): Date => {
-  const nextDueDate = lastPaymentDate ? new Date(lastPaymentDate) : new Date();
-  nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-  nextDueDate.setDate(1);
-  nextDueDate.setHours(0, 0, 0, 0);
-  return nextDueDate;
 };
 
 export const getDayWithSuffix = (date: Date): string => {
