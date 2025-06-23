@@ -1,4 +1,3 @@
-// Updated Borrower remains the same
 export interface Borrower {
   id?: string;
   fullName: string;
@@ -16,7 +15,15 @@ export interface Borrower {
   };
 }
 
-// Updated Loan interface with new fields
+export interface Installment {
+  id: string;
+  dueDate: Date | string;
+  principalAmount: number;
+  penaltyAmount?: number;
+  paidAmount?: number;
+  status: 'pending' | 'partial' | 'paid';
+}
+
 export interface Loan {
   id?: string;
   borrowerId: string;
@@ -35,17 +42,15 @@ export interface Loan {
   status: 'Active' | 'Delayed' | 'Fully Paid' | string;
   notes?: string;
   penaltyApplied?: boolean;
-  
-  // New fields for penalty system
   outstandingBalances?: {
-    dueDate: any; // Keep as any for Firebase compatibility
+    dueDate: any;
     baseAmount: number;
     penaltyAmount: number;
   }[];
-  lastPaymentDate?: any; // Keep as any for Firebase compatibility
+  lastPaymentDate?: any;
+  installments?: Installment[];
 }
 
-// Updated Payment interface
 export interface Payment {
   id?: string;
   loanId: string;
@@ -55,10 +60,10 @@ export interface Payment {
   paymentMethod: string;
   paymentStatus: 'Full' | 'Partial';
   paymentDate: Date | null;
-  notes: string; // Add this line
+  notes: string;
+  installmentId?: string;
 }
 
-// New type for outstanding balances
 export interface OutstandingBalance {
   dueDate: any;
   baseAmount: number;

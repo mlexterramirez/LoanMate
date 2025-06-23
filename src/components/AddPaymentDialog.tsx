@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, Button, 
   TextField, Grid, Typography, Box, CircularProgress, Alert,
-  MenuItem, InputAdornment
+  MenuItem, InputAdornment, Chip, FormControl, InputLabel, Select, 
+  SelectChangeEvent
 } from '@mui/material';
-import { Loan, Payment } from '../types';
+import { CheckCircle, RadioButtonUnchecked } from '@mui/icons-material';
+import { Loan, Payment, Installment } from '../types';
 import { usePaymentService } from '../services/payments';
 import { calculateTotalAmountDue } from '../utils/calculations';
+import { formatFirestoreDate } from '../utils/dateUtils';
 
 interface AddPaymentDialogProps {
   open: boolean;
@@ -20,15 +23,18 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
   open, onClose, onPaymentAdded, loan, loans 
 }) => {
   const { addPayment } = usePaymentService();
+  const [installments, setInstallments] = useState<Installment[]>([]);
+  const [selectedInstallment, setSelectedInstallment] = useState<string | null>(null);
   const [paymentData, setPaymentData] = useState<Omit<Payment, 'id'>>({
     loanId: loan.id || '',
     borrowerId: loan.borrowerId || '',
     amountPaid: 0,
-    penaltyPaid: loan.penalty || 0,
+    penaltyPaid: 0,
     paymentMethod: 'Cash',
     paymentStatus: 'Full',
     paymentDate: new Date(),
-    notes: ''
+    notes: '',
+    installmentId: ''
   });
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(loan);
   const [error, setError] = useState<string | null>(null);
@@ -36,47 +42,82 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
   const [dueAmount, setDueAmount] = useState<number>(0);
   const [principalDue, setPrincipalDue] = useState<number>(0);
   const [penaltyDue, setPenaltyDue] = useState<number>(0);
-  const [amountError, setAmountError] = useState<string | null>(null);
-  const [penaltyError, setPenaltyError] = useState<string | null>(null);
+
+  const parseDate = (date: any): Date | null => {
+    if (!date) return null;
+    if (date instanceof Date) return date;
+    if (typeof date === 'string') return new Date(date);
+    return null;
+  };
 
   useEffect(() => {
     if (open) {
-      calculateDueAmounts(loan);
+      let loanInstallments = loan.installments || [];
+      if (loanInstallments.length === 0) {
+        loanInstallments = generateInstallments(
+          loan.startDate ? new Date(loan.startDate) : new Date(),
+          loan.terms || 0,
+          loan.monthlyDue || 0
+        );
+      }
+      
+      loanInstallments = loanInstallments.map(inst => ({
+        ...inst,
+        dueDate: parseDate(inst.dueDate) || new Date()
+      }));
+      
+      setInstallments(loanInstallments);
+      
+      const totalDue = calculateTotalAmountDue(loan);
+      const principal = loan.outstandingBalances?.reduce(
+        (sum, balance) => sum + (balance.baseAmount || 0), 0) || 0;
+      const penalty = loan.outstandingBalances?.reduce(
+        (sum, balance) => sum + (balance.penaltyAmount || 0), 0) || 0;
+      
+      setDueAmount(totalDue);
+      setPrincipalDue(principal);
+      setPenaltyDue(penalty);
+      
+      const firstPendingInstallment = loanInstallments.find(inst => inst.status === 'pending');
+      const initialInstallmentId = firstPendingInstallment?.id || '';
       
       setPaymentData({
         loanId: loan.id || '',
         borrowerId: loan.borrowerId || '',
-        amountPaid: 0,
-        penaltyPaid: loan.penalty || 0,
+        amountPaid: firstPendingInstallment?.principalAmount || 0,
+        penaltyPaid: firstPendingInstallment?.penaltyAmount || 0,
         paymentMethod: 'Cash',
         paymentStatus: 'Full',
         paymentDate: new Date(),
-        notes: ''
+        notes: '',
+        installmentId: initialInstallmentId
       });
+      
+      setSelectedInstallment(initialInstallmentId);
       setSelectedLoan(loan);
       setError(null);
-      setAmountError(null);
-      setPenaltyError(null);
     }
   }, [open, loan]);
 
-  const calculateDueAmounts = (loan: Loan) => {
-    const totalDue = calculateTotalAmountDue(loan);
-    const principal = loan.outstandingBalances?.reduce(
-      (sum, balance) => sum + (balance.baseAmount || 0), 0) || 0;
-    const penalty = loan.outstandingBalances?.reduce(
-      (sum, balance) => sum + (balance.penaltyAmount || 0), 0) || 0;
-    
-    setDueAmount(totalDue);
-    setPrincipalDue(principal);
-    setPenaltyDue(penalty);
-  };
+  const generateInstallments = (startDate: Date, terms: number, monthlyDue: number): Installment[] => {
+    const installments: Installment[] = [];
+    const dueDate = new Date(startDate);
 
-  useEffect(() => {
-    if (selectedLoan) {
-      calculateDueAmounts(selectedLoan);
+    for (let i = 0; i < terms; i++) {
+      const installmentDueDate = new Date(dueDate);
+      installmentDueDate.setMonth(dueDate.getMonth() + i + 1);
+      
+      installments.push({
+        id: `installment_${i+1}`,
+        dueDate: installmentDueDate,
+        principalAmount: monthlyDue,
+        penaltyAmount: 0,
+        paidAmount: 0,
+        status: 'pending'
+      });
     }
-  }, [selectedLoan]);
+    return installments;
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -85,21 +126,24 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       const newLoan = loans.find(l => l.id === value) || null;
       setSelectedLoan(newLoan);
       
-      setPaymentData(prev => ({
-        ...prev,
-        [name]: value,
-        penaltyPaid: newLoan?.penalty || 0
-      }));
-    } else if (name === 'amountPaid') {
-      let numericValue = parseFloat(value) || 0;
+      const newInstallments = newLoan?.installments || [];
+      setInstallments(newInstallments);
+      
+      const firstPending = newInstallments.find(inst => inst.status === 'pending');
+      const newInstallmentId = firstPending?.id || '';
       
       setPaymentData(prev => ({
         ...prev,
-        [name]: numericValue,
-        paymentStatus: numericValue >= (selectedLoan?.monthlyDue || 0) ? 'Full' : 'Partial'
+        [name]: value,
+        borrowerId: newLoan?.borrowerId || '',
+        amountPaid: firstPending?.principalAmount || 0,
+        penaltyPaid: firstPending?.penaltyAmount || 0,
+        installmentId: newInstallmentId
       }));
-    } else if (name === 'penaltyPaid') {
-      let numericValue = parseFloat(value) || 0;
+      
+      setSelectedInstallment(newInstallmentId);
+    } else if (name === 'amountPaid' || name === 'penaltyPaid') {
+      const numericValue = parseFloat(value) || 0;
       
       setPaymentData(prev => ({
         ...prev,
@@ -113,55 +157,31 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
     }
   };
 
-  const handleNumberInput = (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
-    const value = e.target.value;
-    const numericValue = value.replace(/[^0-9.]/g, '');
+  const handleInstallmentChange = (e: SelectChangeEvent<string>) => {
+    const installmentId = e.target.value as string;
+    const installment = installments.find(inst => inst.id === installmentId);
     
-    // Remove extra periods
-    const parts = numericValue.split('.');
-    let sanitizedValue = parts[0] || '0';
-    if (parts.length > 1) {
-      sanitizedValue += '.' + parts[1].slice(0, 2);
-    }
-    
-    // Remove leading zeros
-    sanitizedValue = sanitizedValue.replace(/^0+/, '') || '0';
-    if (sanitizedValue.startsWith('.')) {
-      sanitizedValue = '0' + sanitizedValue;
-    }
-    
-    // Convert to number and round to two decimals
-    let num = parseFloat(sanitizedValue);
-    if (!isNaN(num)) {
-      num = Math.round(num * 100) / 100;
-    } else {
-      num = 0;
-    }
-    
-    setPaymentData(prev => ({
-      ...prev,
-      [field]: num
-    }));
-  };
-
-  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const date = new Date(e.target.value);
-    if (date.toString() !== 'Invalid Date') {
+    if (installment) {
+      setSelectedInstallment(installmentId);
       setPaymentData(prev => ({
         ...prev,
-        paymentDate: date
+        installmentId,
+        amountPaid: installment.principalAmount - (installment.paidAmount || 0),
+        penaltyPaid: installment.penaltyAmount || 0
       }));
     }
   };
 
   const handleSubmit = async () => {
     setError(null);
-    setAmountError(null);
-    setPenaltyError(null);
     
-    // Validate form
     if (!paymentData.loanId) {
       setError('Please select a loan');
+      return;
+    }
+    
+    if (!paymentData.installmentId) {
+      setError('Please select an installment');
       return;
     }
     
@@ -170,29 +190,10 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       return;
     }
     
-    // Convert all amounts to cents to avoid floating point issues
-    const principalDueCents = Math.round(principalDue * 100);
-    const penaltyDueCents = Math.round(penaltyDue * 100);
-    const dueAmountCents = Math.round(dueAmount * 100);
-    const amountPaidCents = Math.round(paymentData.amountPaid * 100);
-    const penaltyPaidCents = Math.round(paymentData.penaltyPaid * 100);
-    const totalPaymentCents = amountPaidCents + penaltyPaidCents;
+    const totalPayment = paymentData.amountPaid + paymentData.penaltyPaid;
     
-    // Check if principal payment exceeds principal due
-    if (amountPaidCents > principalDueCents) {
-      setError(`Payment amount cannot exceed principal due of ₱${principalDue.toFixed(2)}`);
-      return;
-    }
-    
-    // Check if penalty payment exceeds penalty due
-    if (penaltyPaidCents > penaltyDueCents) {
-      setError(`Penalty paid cannot exceed penalty due of ₱${penaltyDue.toFixed(2)}`);
-      return;
-    }
-    
-    // Check if total payment exceeds total due
-    if (totalPaymentCents > dueAmountCents) {
-      setError(`Total payment cannot exceed total due of ₱${dueAmount.toFixed(2)}`);
+    if (totalPayment > dueAmount) {
+      setError(`Total payment (₱${totalPayment.toFixed(2)}) cannot exceed total due of ₱${dueAmount.toFixed(2)}`);
       return;
     }
     
@@ -241,6 +242,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
                 <Typography>Borrower: {selectedLoan.borrowerName}</Typography>
                 <Typography>Item: {selectedLoan.itemName}</Typography>
                 <Typography>Monthly Due: ₱{selectedLoan.monthlyDue?.toFixed(2)}</Typography>
+                <Typography>Term: {selectedLoan.terms} months</Typography>
                 
                 <Box mt={1}>
                   <Typography>Principal Due: ₱{principalDue.toFixed(2)}</Typography>
@@ -253,34 +255,60 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
             </Grid>
           )}
           
+          <Grid item xs={12}>
+            <FormControl fullWidth>
+              <InputLabel>Select Installment</InputLabel>
+              <Select
+                value={selectedInstallment || ''}
+                onChange={handleInstallmentChange}
+                label="Select Installment"
+              >
+                {installments.map(installment => {
+                  const dueDate = parseDate(installment.dueDate);
+                  return (
+                    <MenuItem 
+                      key={installment.id} 
+                      value={installment.id}
+                      disabled={installment.status === 'paid'}
+                    >
+                      <Box display="flex" alignItems="center">
+                        {installment.status === 'paid' ? (
+                          <CheckCircle color="success" sx={{ mr: 1 }} />
+                        ) : (
+                          <RadioButtonUnchecked sx={{ mr: 1 }} />
+                        )}
+                        <Typography>
+                          {dueDate ? formatFirestoreDate(dueDate) : 'N/A'} - 
+                          ₱{installment.principalAmount.toFixed(2)}
+                          {(installment.penaltyAmount || 0) > 0 && ` + ₱${(installment.penaltyAmount || 0).toFixed(2)} penalty`}
+                        </Typography>
+                        {installment.status === 'paid' && (
+                          <Chip 
+                            label="Paid" 
+                            size="small" 
+                            color="success" 
+                            sx={{ ml: 1 }} 
+                          />
+                        )}
+                      </Box>
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
+          </Grid>
+          
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
               label="Amount Paid"
               name="amountPaid"
-              value={paymentData.amountPaid === 0 ? '' : paymentData.amountPaid.toFixed(2)}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                handleNumberInput(e, 'amountPaid')
-              }
+              value={paymentData.amountPaid.toFixed(2)}
+              onChange={handleChange}
               required
-              error={!!amountError}
-              helperText={amountError}
               InputProps={{
                 startAdornment: <InputAdornment position="start">₱</InputAdornment>,
-                inputProps: { 
-                  min: 0,
-                  step: 0.01
-                }
-              }}
-              onFocus={(e) => {
-                if (e.target.value === '0.00') {
-                  e.target.value = '';
-                }
-              }}
-              onBlur={(e) => {
-                if (e.target.value === '') {
-                  setPaymentData(prev => ({ ...prev, amountPaid: 0 }));
-                }
+                inputProps: { min: 0 }
               }}
             />
           </Grid>
@@ -290,28 +318,11 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
               fullWidth
               label="Penalty Paid"
               name="penaltyPaid"
-              value={paymentData.penaltyPaid === 0 ? '' : paymentData.penaltyPaid.toFixed(2)}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                handleNumberInput(e, 'penaltyPaid')
-              }
-              error={!!penaltyError}
-              helperText={penaltyError}
+              value={paymentData.penaltyPaid.toFixed(2)}
+              onChange={handleChange}
               InputProps={{
                 startAdornment: <InputAdornment position="start">₱</InputAdornment>,
-                inputProps: { 
-                  min: 0,
-                  step: 0.01
-                }
-              }}
-              onFocus={(e) => {
-                if (e.target.value === '0.00') {
-                  e.target.value = '';
-                }
-              }}
-              onBlur={(e) => {
-                if (e.target.value === '') {
-                  setPaymentData(prev => ({ ...prev, penaltyPaid: 0 }));
-                }
+                inputProps: { min: 0 }
               }}
             />
           </Grid>
@@ -353,7 +364,15 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
               type="date"
               InputLabelProps={{ shrink: true }}
               value={paymentData.paymentDate ? paymentData.paymentDate.toISOString().split('T')[0] : ''}
-              onChange={handleDateChange}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const date = new Date(e.target.value);
+                if (date.toString() !== 'Invalid Date') {
+                  setPaymentData(prev => ({
+                    ...prev,
+                    paymentDate: date
+                  }));
+                }
+              }}
             />
           </Grid>
           
@@ -366,6 +385,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
               onChange={handleChange}
               multiline
               rows={3}
+              placeholder={`The borrower is paying a ${paymentData.paymentStatus.toLowerCase()} amount of ₱${(paymentData.amountPaid + paymentData.penaltyPaid).toFixed(2)} (₱${paymentData.amountPaid.toFixed(2)} principal + ₱${paymentData.penaltyPaid.toFixed(2)} penalty) via ${paymentData.paymentMethod}`}
             />
           </Grid>
         </Grid>
