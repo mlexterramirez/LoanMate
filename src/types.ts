@@ -33,8 +33,8 @@ export interface Loan {
   downpayment: number;
   terms: number;
   monthlyInterestPct: number;
-  startDate: any;
-  dueDate?: any;
+  loanCreatedDate: Date | string;  // Changed from startDate
+  firstDueDate: Date | string;     // Changed from dueDate
   monthlyDue: number;
   totalPaid?: number;
   paymentProgress?: string;

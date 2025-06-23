@@ -10,7 +10,7 @@ import { getPayments } from '../services/payments';
 import { getBorrowers } from '../services/borrowers';
 import { Loan, Borrower } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
-import { calculateNextDueDate } from '../utils/calculations';
+import { getNextUnpaidDueDate } from '../utils/calculations';
 
 interface DashboardSummary {
   totalCollected: number;
@@ -65,50 +65,55 @@ export default function DashboardPage() {
             sum + (loan.totalPrice || 0) - (loan.totalPaid || 0), 0);
         
         const today = new Date();
+        today.setHours(0, 0, 0, 0);
         
-        // Calculate upcoming payments with next unpaid due date
-        const upcomingPaymentsData = allLoans
-          .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
-          .map(loan => {
-            const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
-            const loanPayments = allPayments
-              .filter(p => p.loanId === loan.id && p.paymentDate)
-              .sort((a, b) => {
-                const aDate = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
-                const bDate = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
-                return bDate.getTime() - aDate.getTime();
-              });
-            
-            // Find the next unpaid due date
-            let nextDueDate = loan.dueDate ? new Date(loan.dueDate) : null;
-            if (loanPayments.length > 0 && loanPayments[0].paymentDate) {
-              const lastPaymentDate = new Date(loanPayments[0].paymentDate);
-              nextDueDate = calculateNextDueDate(lastPaymentDate);
-            }
-            
-            // Only show if next due date is in the future
-            if (!nextDueDate || nextDueDate < today) return null;
-
-            return {
+        // Calculate upcoming payments using the new installment system
+        const upcomingPaymentsData: UpcomingPayment[] = [];
+        
+        allLoans.forEach(loan => {
+          if (loan.status === 'Fully Paid') return;
+          
+          const nextDueDate = getNextUnpaidDueDate(loan);
+          if (!nextDueDate) return;
+          
+          const borrower = allBorrowers.find(b => b.id === loan.borrowerId);
+          const borrowerName = loan.borrowerName || borrower?.fullName || 'Unknown';
+          
+          // Check if this due date is upcoming (within next 7 days)
+          const timeDiff = nextDueDate.getTime() - today.getTime();
+          const daysDiff = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+          
+          if (daysDiff <= 7 && daysDiff >= 0) {
+            upcomingPaymentsData.push({
               borrowerId: loan.borrowerId || '',
-              borrowerName: loan.borrowerName || '',
+              borrowerName,
               dueDate: nextDueDate,
               amount: loan.monthlyDue || 0,
-              status: loan.status?.includes?.('Delayed') ? 'Late' : 'Active',
+              status: daysDiff < 0 ? 'Late' : 'Upcoming',
               loanStats: borrower ? 
                 `${borrower.loanStats?.totalLoans || 0} Loans, ${borrower.loanStats?.latePayments || 0} Late, ₱${(borrower.loanStats?.totalPaid || 0).toLocaleString()} Paid` : 
                 '',
               itemName: loan.itemName || ''
-            };
-          })
-          .filter(payment => payment !== null)
-          .sort((a, b) => (a!.dueDate?.getTime() || 0) - (b!.dueDate?.getTime() || 0)) as UpcomingPayment[];
+            });
+          }
+        });
+        
+        // Sort by due date
+        upcomingPaymentsData.sort((a, b) => 
+          (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0)
+        );
+        
+        // Count late loans
+        const lateLoans = allLoans.filter(loan => {
+          const nextDueDate = getNextUnpaidDueDate(loan);
+          return nextDueDate && nextDueDate < today;
+        }).length;
         
         setSummary({
           totalCollected: collected,
           totalOutstanding: outstanding,
           upcomingDue: upcomingPaymentsData.length,
-          lateLoans: upcomingPaymentsData.filter(p => p.status === 'Late').length,
+          lateLoans,
         });
         
         setLoans(allLoans);

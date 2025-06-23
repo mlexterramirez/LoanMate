@@ -5,10 +5,10 @@ import {
   MenuItem, InputAdornment, Chip, FormControl, InputLabel, Select, 
   SelectChangeEvent
 } from '@mui/material';
-import { CheckCircle, RadioButtonUnchecked } from '@mui/icons-material';
+import { CheckCircle, RadioButtonUnchecked, Warning } from '@mui/icons-material';
 import { Loan, Payment, Installment } from '../types';
 import { usePaymentService } from '../services/payments';
-import { calculateTotalAmountDue } from '../utils/calculations';
+import { calculateTotalAmountDue, calculateEndDueDate } from '../utils/calculations';
 import { formatFirestoreDate } from '../utils/dateUtils';
 
 interface AddPaymentDialogProps {
@@ -42,6 +42,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
   const [dueAmount, setDueAmount] = useState<number>(0);
   const [principalDue, setPrincipalDue] = useState<number>(0);
   const [penaltyDue, setPenaltyDue] = useState<number>(0);
+  const [endDueDate, setEndDueDate] = useState<Date | null>(null);
 
   const parseDate = (date: any): Date | null => {
     if (!date) return null;
@@ -52,15 +53,15 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
 
   useEffect(() => {
     if (open) {
+      // Initialize installments if not present
       let loanInstallments = loan.installments || [];
       if (loanInstallments.length === 0) {
-        loanInstallments = generateInstallments(
-          loan.startDate ? new Date(loan.startDate) : new Date(),
-          loan.terms || 0,
-          loan.monthlyDue || 0
-        );
+        // Generate installments using the loan's firstDueDate
+        const firstDue = loan.firstDueDate ? new Date(loan.firstDueDate) : new Date();
+        loanInstallments = generateInstallments(firstDue, loan.terms || 0, loan.monthlyDue || 0);
       }
       
+      // Ensure dates are Date objects
       loanInstallments = loanInstallments.map(inst => ({
         ...inst,
         dueDate: parseDate(inst.dueDate) || new Date()
@@ -68,6 +69,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       
       setInstallments(loanInstallments);
       
+      // Calculate due amounts
       const totalDue = calculateTotalAmountDue(loan);
       const principal = loan.outstandingBalances?.reduce(
         (sum, balance) => sum + (balance.baseAmount || 0), 0) || 0;
@@ -78,13 +80,18 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       setPrincipalDue(principal);
       setPenaltyDue(penalty);
       
-      const firstPendingInstallment = loanInstallments.find(inst => inst.status === 'pending');
+      // Set initial payment data
+      const firstPendingInstallment = loanInstallments.find(inst => 
+        inst.status === 'pending' || inst.status === 'partial'
+      );
       const initialInstallmentId = firstPendingInstallment?.id || '';
+      const remainingAmount = firstPendingInstallment ? 
+        (firstPendingInstallment.principalAmount - (firstPendingInstallment.paidAmount || 0)) : 0;
       
       setPaymentData({
         loanId: loan.id || '',
         borrowerId: loan.borrowerId || '',
-        amountPaid: firstPendingInstallment?.principalAmount || 0,
+        amountPaid: remainingAmount,
         penaltyPaid: firstPendingInstallment?.penaltyAmount || 0,
         paymentMethod: 'Cash',
         paymentStatus: 'Full',
@@ -95,17 +102,22 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       
       setSelectedInstallment(initialInstallmentId);
       setSelectedLoan(loan);
+      setEndDueDate(calculateEndDueDate(loan));
       setError(null);
     }
   }, [open, loan]);
 
-  const generateInstallments = (startDate: Date, terms: number, monthlyDue: number): Installment[] => {
+  // Helper function to generate installments based on firstDueDate
+  const generateInstallments = (
+    firstDueDate: Date,
+    terms: number,
+    monthlyDue: number
+  ): Installment[] => {
     const installments: Installment[] = [];
-    const dueDate = new Date(startDate);
-
+    
     for (let i = 0; i < terms; i++) {
-      const installmentDueDate = new Date(dueDate);
-      installmentDueDate.setMonth(dueDate.getMonth() + i + 1);
+      const installmentDueDate = new Date(firstDueDate);
+      installmentDueDate.setMonth(firstDueDate.getMonth() + i);
       
       installments.push({
         id: `installment_${i+1}`,
@@ -116,6 +128,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
         status: 'pending'
       });
     }
+    
     return installments;
   };
 
@@ -126,22 +139,28 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       const newLoan = loans.find(l => l.id === value) || null;
       setSelectedLoan(newLoan);
       
+      // Update installments for the new loan
       const newInstallments = newLoan?.installments || [];
       setInstallments(newInstallments);
       
-      const firstPending = newInstallments.find(inst => inst.status === 'pending');
+      const firstPending = newInstallments.find(inst => 
+        inst.status === 'pending' || inst.status === 'partial'
+      );
       const newInstallmentId = firstPending?.id || '';
+      const remainingAmount = firstPending ? 
+        (firstPending.principalAmount - (firstPending.paidAmount || 0)) : 0;
       
       setPaymentData(prev => ({
         ...prev,
         [name]: value,
         borrowerId: newLoan?.borrowerId || '',
-        amountPaid: firstPending?.principalAmount || 0,
+        amountPaid: remainingAmount,
         penaltyPaid: firstPending?.penaltyAmount || 0,
         installmentId: newInstallmentId
       }));
       
       setSelectedInstallment(newInstallmentId);
+      setEndDueDate(calculateEndDueDate(newLoan || loan));
     } else if (name === 'amountPaid' || name === 'penaltyPaid') {
       const numericValue = parseFloat(value) || 0;
       
@@ -163,10 +182,11 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
     
     if (installment) {
       setSelectedInstallment(installmentId);
+      const remainingAmount = installment.principalAmount - (installment.paidAmount || 0);
       setPaymentData(prev => ({
         ...prev,
         installmentId,
-        amountPaid: installment.principalAmount - (installment.paidAmount || 0),
+        amountPaid: remainingAmount,
         penaltyPaid: installment.penaltyAmount || 0
       }));
     }
@@ -175,6 +195,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
   const handleSubmit = async () => {
     setError(null);
     
+    // Validate form
     if (!paymentData.loanId) {
       setError('Please select a loan');
       return;
@@ -190,8 +211,10 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
       return;
     }
     
+    // Calculate total payment
     const totalPayment = paymentData.amountPaid + paymentData.penaltyPaid;
     
+    // Check if total payment exceeds total due
     if (totalPayment > dueAmount) {
       setError(`Total payment (₱${totalPayment.toFixed(2)}) cannot exceed total due of ₱${dueAmount.toFixed(2)}`);
       return;
@@ -241,6 +264,9 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
                 <Typography variant="subtitle1">Loan Details</Typography>
                 <Typography>Borrower: {selectedLoan.borrowerName}</Typography>
                 <Typography>Item: {selectedLoan.itemName}</Typography>
+                <Typography>Loan Created: {selectedLoan.loanCreatedDate ? new Date(selectedLoan.loanCreatedDate).toLocaleDateString() : 'N/A'}</Typography>
+                <Typography>First Due: {selectedLoan.firstDueDate ? new Date(selectedLoan.firstDueDate).toLocaleDateString() : 'N/A'}</Typography>
+                <Typography>End Due: {endDueDate ? endDueDate.toLocaleDateString() : 'N/A'}</Typography>
                 <Typography>Monthly Due: ₱{selectedLoan.monthlyDue?.toFixed(2)}</Typography>
                 <Typography>Term: {selectedLoan.terms} months</Typography>
                 
@@ -265,29 +291,58 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
               >
                 {installments.map(installment => {
                   const dueDate = parseDate(installment.dueDate);
+                  const isPaid = installment.status === 'paid';
+                  const isPartial = installment.status === 'partial';
+                  const remainingAmount = installment.principalAmount - (installment.paidAmount || 0);
+                  
+                  // Explicit color definitions
+                  const paidColor = '#4caf50'; // Green
+                  const partialColor = '#ff9800'; // Orange
+                  const pendingColor = '#9e9e9e'; // Gray
+                  
                   return (
                     <MenuItem 
                       key={installment.id} 
                       value={installment.id}
-                      disabled={installment.status === 'paid'}
+                      disabled={isPaid}
+                      sx={{
+                        opacity: isPaid ? 0.7 : 1,
+                        pointerEvents: isPaid ? 'none' : 'auto',
+                      }}
                     >
                       <Box display="flex" alignItems="center">
-                        {installment.status === 'paid' ? (
-                          <CheckCircle color="success" sx={{ mr: 1 }} />
+                        {isPaid ? (
+                          <CheckCircle sx={{ mr: 1, color: paidColor }} />
+                        ) : isPartial ? (
+                          <Warning sx={{ mr: 1, color: partialColor }} />
                         ) : (
-                          <RadioButtonUnchecked sx={{ mr: 1 }} />
+                          <RadioButtonUnchecked sx={{ mr: 1, color: pendingColor }} />
                         )}
                         <Typography>
                           {dueDate ? formatFirestoreDate(dueDate) : 'N/A'} - 
-                          ₱{installment.principalAmount.toFixed(2)}
+                          ₱{remainingAmount.toFixed(2)}
                           {(installment.penaltyAmount || 0) > 0 && ` + ₱${(installment.penaltyAmount || 0).toFixed(2)} penalty`}
                         </Typography>
-                        {installment.status === 'paid' && (
+                        {isPaid && (
                           <Chip 
                             label="Paid" 
                             size="small" 
-                            color="success" 
-                            sx={{ ml: 1 }} 
+                            sx={{ 
+                              ml: 1, 
+                              backgroundColor: paidColor, 
+                              color: 'white' 
+                            }} 
+                          />
+                        )}
+                        {isPartial && (
+                          <Chip 
+                            label="Partial" 
+                            size="small" 
+                            sx={{ 
+                              ml: 1, 
+                              backgroundColor: partialColor, 
+                              color: 'white' 
+                            }} 
                           />
                         )}
                       </Box>
@@ -400,7 +455,7 @@ const AddPaymentDialog: React.FC<AddPaymentDialogProps> = ({
           variant="contained"
           disabled={loading}
         >
-          {loading ? <CircularProgress size={24} /> : 'Add Payment'}
+          {loading ? <CircularProgress size={24} /> : 'Record Payment'}
         </Button>
       </DialogActions>
     </Dialog>
