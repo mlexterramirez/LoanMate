@@ -7,6 +7,7 @@ import {
 import { calculateMonthlyDue, getDayWithSuffix } from '../utils/calculations';
 import { Loan } from '../types';
 import { useLoanService } from '../services/loans';
+import { getBorrowers } from '../services/borrowers';
 
 interface AddLoanDialogProps {
   open: boolean;
@@ -35,10 +36,20 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
   const [endDueDate, setEndDueDate] = useState<Date | null>(null);
 
   useEffect(() => {
+    const fetchBorrowers = async () => {
+      try {
+        const data = await getBorrowers();
+        setBorrowers(data);
+      } catch (error) {
+        console.error('Error loading borrowers:', error);
+        // Fallback to localStorage if service fails
+        const savedBorrowers = JSON.parse(localStorage.getItem('Borrowers') || '[]');
+        setBorrowers(savedBorrowers);
+      }
+    };
+
     if (open) {
-      // Load borrowers and reset form
-      const savedBorrowers = JSON.parse(localStorage.getItem('borrowers') || '[]');
-      setBorrowers(savedBorrowers);
+      fetchBorrowers();
       setLoanData({
         borrowerId: '',
         borrowerName: '',
