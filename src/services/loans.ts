@@ -1,16 +1,23 @@
 import { db } from "../firebase";
 import { 
-  collection, addDoc, getDocs, doc, updateDoc, getDoc, 
-  query, where, deleteDoc, Timestamp 
+  addDoc, collection, getDocs, doc, getDoc, updateDoc, deleteDoc, 
+  query, where, Timestamp 
 } from "firebase/firestore";
-import { Loan, OutstandingBalance } from "../types";
+import { Loan, Installment, OutstandingBalance } from "../types";
 import { calculateMonthlyDue, updateLoanStatus } from "../utils/calculations";
 import { getBorrower, updateBorrowerStats } from "./borrowers";
 import { toDate } from "../utils/dateUtils";
 
 const loansRef = collection(db, "loans");
 
-export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied' | 'outstandingBalances' | 'lastPaymentDate'>) => {
+const toNonNullableDate = (value: any): Date => {
+  if (value instanceof Date) return value;
+  if (value instanceof Timestamp) return value.toDate();
+  if (typeof value === 'string') return new Date(value);
+  return new Date(); // Return current date as fallback
+};
+
+export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied' | 'outstandingBalances' | 'lastPaymentDate' | 'installments'>) => {
   try {
     const borrower = await getBorrower(loan.borrowerId);
     if (!borrower) throw new Error("Borrower not found");
@@ -30,14 +37,16 @@ export const addLoan = async (loan: Omit<Loan, 'id' | 'status' | 'totalPaid' | '
       penalty: 0,
       penaltyApplied: false,
       outstandingBalances: [],
-      lastPaymentDate: null
+      lastPaymentDate: null,
+      installments: []
     };
 
-    if (loan.startDate instanceof Date) {
-      loanWithDefaults.startDate = Timestamp.fromDate(loan.startDate);
+    // Convert Date objects to Firestore Timestamps
+    if (loan.loanCreatedDate) {
+      loanWithDefaults.loanCreatedDate = Timestamp.fromDate(new Date(loan.loanCreatedDate));
     }
-    if (loan.dueDate instanceof Date) {
-      loanWithDefaults.dueDate = Timestamp.fromDate(loan.dueDate);
+    if (loan.firstDueDate) {
+      loanWithDefaults.firstDueDate = Timestamp.fromDate(new Date(loan.firstDueDate));
     }
 
     const newLoan = await addDoc(loansRef, loanWithDefaults);
@@ -66,8 +75,8 @@ export const getLoans = async (): Promise<Loan[]> => {
         downpayment: data.downpayment || 0,
         terms: data.terms || 0,
         monthlyInterestPct: data.monthlyInterestPct || 0,
-        startDate: data.startDate ? toDate(data.startDate) : null,
-        dueDate: data.dueDate ? toDate(data.dueDate) : null,
+        loanCreatedDate: toNonNullableDate(data.loanCreatedDate),
+        firstDueDate: toNonNullableDate(data.firstDueDate),
         monthlyDue: data.monthlyDue || 0,
         paymentProgress: data.paymentProgress || '',
         notes: data.notes || '',
@@ -80,10 +89,10 @@ export const getLoans = async (): Promise<Loan[]> => {
           baseAmount: b.baseAmount || 0,
           penaltyAmount: b.penaltyAmount || 0
         })),
-        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null,
+        installments: data.installments || []
       };
       
-      // Update loan status with new penalty system
       return updateLoanStatus(loan);
     });
   } catch (error) {
@@ -107,8 +116,8 @@ export const getLoan = async (id: string): Promise<Loan | null> => {
         downpayment: data.downpayment || 0,
         terms: data.terms || 0,
         monthlyInterestPct: data.monthlyInterestPct || 0,
-        startDate: data.startDate ? toDate(data.startDate) : null,
-        dueDate: data.dueDate ? toDate(data.dueDate) : null,
+        loanCreatedDate: toNonNullableDate(data.loanCreatedDate),
+        firstDueDate: toNonNullableDate(data.firstDueDate),
         monthlyDue: data.monthlyDue || 0,
         paymentProgress: data.paymentProgress || '',
         notes: data.notes || '',
@@ -121,7 +130,8 @@ export const getLoan = async (id: string): Promise<Loan | null> => {
           baseAmount: b.baseAmount || 0,
           penaltyAmount: b.penaltyAmount || 0
         })),
-        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null,
+        installments: data.installments || []
       };
       
       return updateLoanStatus(loan);
@@ -139,22 +149,21 @@ export const updateLoan = async (id: string, updates: Partial<Loan>) => {
     const dataToUpdate: any = { ...updates };
     
     // Convert Date objects to Firestore Timestamps
-    if (updates.startDate instanceof Date) {
-      dataToUpdate.startDate = Timestamp.fromDate(updates.startDate);
+    if (updates.loanCreatedDate) {
+      dataToUpdate.loanCreatedDate = Timestamp.fromDate(new Date(updates.loanCreatedDate));
     }
-    if (updates.dueDate instanceof Date) {
-      dataToUpdate.dueDate = Timestamp.fromDate(updates.dueDate);
+    if (updates.firstDueDate) {
+      dataToUpdate.firstDueDate = Timestamp.fromDate(new Date(updates.firstDueDate));
     }
-    if (updates.lastPaymentDate instanceof Date) {
-      dataToUpdate.lastPaymentDate = Timestamp.fromDate(updates.lastPaymentDate);
+    if (updates.lastPaymentDate) {
+      dataToUpdate.lastPaymentDate = Timestamp.fromDate(new Date(updates.lastPaymentDate));
     }
     
     // Convert outstandingBalances dates
     if (updates.outstandingBalances) {
       dataToUpdate.outstandingBalances = updates.outstandingBalances.map(balance => ({
         ...balance,
-        dueDate: balance.dueDate instanceof Date ? 
-          Timestamp.fromDate(balance.dueDate) : balance.dueDate
+        dueDate: balance.dueDate ? Timestamp.fromDate(new Date(balance.dueDate)) : null
       }));
     }
     
@@ -190,8 +199,8 @@ export const getLoansByBorrower = async (borrowerId: string): Promise<Loan[]> =>
         downpayment: data.downpayment || 0,
         terms: data.terms || 0,
         monthlyInterestPct: data.monthlyInterestPct || 0,
-        startDate: data.startDate ? toDate(data.startDate) : null,
-        dueDate: data.dueDate ? toDate(data.dueDate) : null,
+        loanCreatedDate: toNonNullableDate(data.loanCreatedDate),
+        firstDueDate: toNonNullableDate(data.firstDueDate),
         monthlyDue: data.monthlyDue || 0,
         paymentProgress: data.paymentProgress || '',
         notes: data.notes || '',
@@ -204,7 +213,8 @@ export const getLoansByBorrower = async (borrowerId: string): Promise<Loan[]> =>
           baseAmount: b.baseAmount || 0,
           penaltyAmount: b.penaltyAmount || 0
         })),
-        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null
+        lastPaymentDate: data.lastPaymentDate ? toDate(data.lastPaymentDate) : null,
+        installments: data.installments || []
       };
       return updateLoanStatus(loan);
     });
@@ -220,7 +230,7 @@ export const checkAndUpdateOverdueLoans = async () => {
     const today = new Date();
     
     for (const loan of loans) {
-      if (loan.status === 'Fully Paid' || !loan.dueDate) continue;
+      if (loan.status === 'Fully Paid' || !loan.firstDueDate) continue;
       
       // Use the new penalty system to update loan status
       const updatedLoan = updateLoanStatus(loan);
@@ -251,9 +261,9 @@ export const checkAndUpdateOverdueLoans = async () => {
 
 export const useLoanService = () => {
   return {
+    addLoan,
     getLoans,
     getLoan,
-    addLoan,
     updateLoan,
     deleteLoan,
     getLoansByBorrower,

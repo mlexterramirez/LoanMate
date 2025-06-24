@@ -1,9 +1,9 @@
 import { db } from "../firebase";
 import { 
-  collection, addDoc, getDocs, doc, updateDoc, 
+  addDoc, collection, getDocs, doc, updateDoc, 
   query, where, deleteDoc, Timestamp 
 } from "firebase/firestore";
-import { Payment, Loan } from "../types";
+import { Payment, Loan, Installment } from "../types";
 import { getLoan, updateLoan } from "./loans";
 import { getBorrower, updateBorrowerStats } from "./borrowers";
 import { toDate } from "../utils/dateUtils";
@@ -116,11 +116,12 @@ export const getPayments = async (): Promise<Payment[]> => {
         loanId: data.loanId || '',
         borrowerId: data.borrowerId || '',
         amountPaid: data.amountPaid || 0,
-        penaltyPaid: data.penaltyPaid || 0, // Added penaltyPaid field
+        penaltyPaid: data.penaltyPaid || 0,
         paymentMethod: data.paymentMethod || 'Cash',
         paymentStatus: data.paymentStatus || 'Full',
         paymentDate: data.paymentDate ? toDate(data.paymentDate) : null,
-        notes: data.notes || ''
+        notes: data.notes || '',
+        installmentId: data.installmentId
       };
     });
   } catch (error) {
@@ -154,7 +155,8 @@ export const getPaymentsByLoan = async (loanId: string): Promise<Payment[]> => {
         paymentMethod: data.paymentMethod || 'Cash',
         paymentStatus: data.paymentStatus || 'Full',
         paymentDate: data.paymentDate ? toDate(data.paymentDate) : null,
-        notes: data.notes || ''
+        notes: data.notes || '',
+        installmentId: data.installmentId
       };
     });
   } catch (error) {
@@ -171,8 +173,8 @@ export const getTotalPaidByLoan = async (loanId: string): Promise<number> => {
     console.error('Error getting total paid by loan:', error);
     return 0;
   }
-
 };
+
 export const usePaymentService = () => {
   return {
     addPayment,

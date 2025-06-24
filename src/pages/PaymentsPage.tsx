@@ -10,10 +10,15 @@ import { getPayments } from '../services/payments';
 import { Loan, Payment as PaymentType } from '../types';
 import { formatFirestoreDate } from '../utils/dateUtils';
 import AddPaymentDialog from '../components/AddPaymentDialog';
-import { calculateNextDueDate, getDayWithSuffix } from '../utils/calculations';
+import { getDayWithSuffix } from '../utils/calculations';
+
+// Define extended loan type with nextDueDate property
+interface LoanWithNextDueDate extends Loan {
+  nextDueDate: Date | null;
+}
 
 export default function PaymentsPage() {
-  const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
+  const [activeLoans, setActiveLoans] = useState<LoanWithNextDueDate[]>([]);
   const [paymentHistory, setPaymentHistory] = useState<PaymentType[]>([]);
   const [tabValue, setTabValue] = useState(0);
   const [openDialog, setOpenDialog] = useState(false);
@@ -31,33 +36,39 @@ export default function PaymentsPage() {
         getPayments()
       ]);
 
-      // Filter active loans with next unpaid due date
-      const filteredActiveLoans = allLoans
-        .filter(loan => loan.status !== 'Fully Paid' && loan.dueDate)
+      // Create loans with next due date calculation
+      const loansWithNextDue = allLoans
+        .filter((loan: Loan) => loan.status !== 'Fully Paid' && loan.firstDueDate)
         .map(loan => {
+          // Get payments for this loan, sorted by paymentDate descending
           const loanPayments = allPayments
             .filter(p => p.loanId === loan.id && p.paymentDate)
             .sort((a, b) => {
-              const aDate = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
-              const bDate = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
-              return bDate.getTime() - aDate.getTime();
+              const dateA = a.paymentDate ? new Date(a.paymentDate).getTime() : 0;
+              const dateB = b.paymentDate ? new Date(b.paymentDate).getTime() : 0;
+              return dateB - dateA;
             });
           
-          // Calculate next unpaid due date
-          let nextDueDate = loan.dueDate ? new Date(loan.dueDate) : null;
+          let nextDueDate: Date | null = null;
+          if (loan.firstDueDate) {
+            nextDueDate = new Date(loan.firstDueDate);
+          }
+
+          // If there are payments, calculate next due date from last payment
           if (loanPayments.length > 0 && loanPayments[0].paymentDate) {
             const lastPaymentDate = new Date(loanPayments[0].paymentDate);
-            nextDueDate = calculateNextDueDate(lastPaymentDate);
+            nextDueDate = new Date(lastPaymentDate);
+            nextDueDate.setMonth(nextDueDate.getMonth() + 1);
           }
           
           return {
             ...loan,
-            dueDate: nextDueDate
-          };
+            nextDueDate
+          } as LoanWithNextDueDate;
         })
-        .filter(loan => loan.dueDate && loan.dueDate > new Date()); // Only show future due dates
+        .filter(loan => loan.nextDueDate && loan.nextDueDate > new Date());
 
-      setActiveLoans(filteredActiveLoans);
+      setActiveLoans(loansWithNextDue);
       setPaymentHistory(allPayments);
     } catch (err) {
       console.error('Error fetching payment data:', err);
@@ -128,8 +139,8 @@ export default function PaymentsPage() {
                   <TableCell>{loan.borrowerName}</TableCell>
                   <TableCell>{loan.itemName}</TableCell>
                   <TableCell>
-                    {loan.dueDate ? 
-                      `${getDayWithSuffix(loan.dueDate)} of the month` : 
+                    {loan.nextDueDate ? 
+                      `${getDayWithSuffix(loan.nextDueDate)} of the month` : 
                       'N/A'}
                   </TableCell>
                   <TableCell>₱{loan.monthlyDue?.toFixed(2) || '0.00'}</TableCell>
