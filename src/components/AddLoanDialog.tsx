@@ -2,13 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, Button,
   TextField, Grid, Typography, Box, CircularProgress, Alert,
-  InputAdornment, FormControl, InputLabel, MenuItem, Select
+  InputAdornment, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent
 } from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { calculateMonthlyDue, getDayWithSuffix } from '../utils/calculations';
 import { Loan } from '../types';
 import { useLoanService } from '../services/loans';
-import dayjs, { Dayjs } from 'dayjs';
 
 interface AddLoanDialogProps {
   open: boolean;
@@ -18,7 +16,8 @@ interface AddLoanDialogProps {
 
 const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdded }) => {
   const { addLoan } = useLoanService();
-  const [loanData, setLoanData] = useState<Omit<Loan, 'id' | 'status'>>({
+  const [borrowers, setBorrowers] = useState<any[]>([]);
+  const [loanData, setLoanData] = useState<Omit<Loan, 'id' | 'status' | 'totalPaid' | 'penalty' | 'penaltyApplied' | 'outstandingBalances' | 'lastPaymentDate' | 'installments'>>({
     borrowerId: '',
     borrowerName: '',
     itemName: '',
@@ -31,15 +30,14 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
     monthlyDue: 0,
     notes: ''
   });
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [borrowers, setBorrowers] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [endDueDate, setEndDueDate] = useState<Date | null>(null);
 
   useEffect(() => {
     if (open) {
       // Load borrowers and reset form
-      const savedBorrowers = JSON.parse(localStorage.getItem('borrowers') || [];
+      const savedBorrowers = JSON.parse(localStorage.getItem('borrowers') || '[]');
       setBorrowers(savedBorrowers);
       setLoanData({
         borrowerId: '',
@@ -81,7 +79,7 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
     }
   }, [loanData.firstDueDate, loanData.terms]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     
     if (name === 'borrowerId') {
@@ -99,15 +97,14 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
     }
   };
 
-  const handleLoanCreatedDateChange = (date: Dayjs | null) => {
-    if (date) {
-      setLoanData(prev => ({ ...prev, loanCreatedDate: date.toDate() }));
-    }
+  const handleSelectChange = (e: SelectChangeEvent<string>) => {
+    const { name, value } = e.target;
+    setLoanData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleFirstDueDateChange = (date: Dayjs | null) => {
+  const handleDateChange = (name: 'loanCreatedDate' | 'firstDueDate', date: Date | null) => {
     if (date) {
-      setLoanData(prev => ({ ...prev, firstDueDate: date.toDate() }));
+      setLoanData(prev => ({ ...prev, [name]: date }));
     }
   };
 
@@ -165,7 +162,7 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
               <InputLabel>Borrower</InputLabel>
               <Select
                 value={loanData.borrowerId}
-                onChange={handleChange}
+                onChange={handleSelectChange}
                 label="Borrower"
                 name="borrowerId"
                 required
@@ -243,23 +240,26 @@ const AddLoanDialog: React.FC<AddLoanDialogProps> = ({ open, onClose, onLoanAdde
           </Grid>
           
           <Grid item xs={12} sm={4}>
-            <DatePicker
+            <TextField
+              fullWidth
               label="Loan Created Date"
-              value={dayjs(loanData.loanCreatedDate)}
-              onChange={handleLoanCreatedDateChange}
-              format="DD/MM/YYYY"
-              slotProps={{ textField: { fullWidth: true } }}
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={loanData.loanCreatedDate instanceof Date ? loanData.loanCreatedDate.toISOString().split('T')[0] : ''}
+              onChange={(e) => handleDateChange('loanCreatedDate', e.target.value ? new Date(e.target.value) : null)}
               disabled
             />
           </Grid>
           
           <Grid item xs={12} sm={4}>
-            <DatePicker
+            <TextField
+              fullWidth
               label="First Due Date"
-              value={dayjs(loanData.firstDueDate)}
-              onChange={handleFirstDueDateChange}
-              format="DD/MM/YYYY"
-              slotProps={{ textField: { fullWidth: true } }}
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={loanData.firstDueDate instanceof Date ? loanData.firstDueDate.toISOString().split('T')[0] : ''}
+              onChange={(e) => handleDateChange('firstDueDate', e.target.value ? new Date(e.target.value) : null)}
+              required
             />
           </Grid>
           
